@@ -207,7 +207,8 @@ create table public.companies (
   contact_name       text,
   phone              text,
   email              text,
-  -- 送り方：post=郵送（南條さんが印刷して投函）/ email=セレッジ担当がメールで直接送る（★の企業）
+  -- いつもの送り方（目安）：post=郵送（南條さんが印刷して投函）/ email=セレッジ担当がメールで直接送る（★の企業）
+  --   担当者によって変わることがあるので、実際の送り方は請求書ごとにその都度選ぶ
   send_method        text not null default 'post' check (send_method in ('post', 'email')),
   -- 入金予定日：請求月の何か月後の何日か（日が空なら月末）
   payment_due_months integer not null default 1 check (payment_due_months between 0 and 6),
@@ -218,7 +219,7 @@ create table public.companies (
   version    integer not null default 1
 );
 
-comment on column public.companies.send_method        is 'post=郵送 / email=セレッジ担当がメールで直接送る';
+comment on column public.companies.send_method        is 'いつもの送り方（目安）。post=郵送 / email=セレッジ担当がメールで直接送る。実際は請求書ごとに選ぶ';
 comment on column public.companies.payment_due_months is '入金予定日：請求月の何か月後か（翌月末なら1）';
 comment on column public.companies.payment_due_day    is '入金予定日の日。空なら月末';
 
@@ -239,7 +240,9 @@ create table public.contracts (
   company_id                uuid not null references public.companies(id),
   name                      text not null,                       -- 例：在留サポートサービス
   cohort                    text,                                -- 例：二期生
-  kind                      text not null default 'monthly' check (kind in ('monthly', 'one_time')),
+  -- monthly=毎月請求（分割・月額。請求のない月は「未請求」と出る）
+  -- on_demand=都度請求（請求するタイミングが来たときだけ。請求のない月は「請求なし」）/ one_time=1回だけ
+  kind                      text not null default 'monthly' check (kind in ('monthly', 'on_demand', 'one_time')),
   quantity                  numeric(10, 2) not null default 1,   -- 人数など
   unit_price                integer not null default 0,          -- 税抜単価
   taxable                   boolean not null default true,
@@ -281,7 +284,7 @@ create table public.invoices (
   -- 下書きでも決めておけるもの（空なら送付OKのときに決まる）
   issue_date          date,                 -- 請求日。空なら請求月の末日
   payment_due_date    date,                 -- 入金予定日。空なら企業の設定から
-  send_method         text not null default 'post' check (send_method in ('post', 'email')),
+  send_method         text check (send_method in ('post', 'email')),  -- 請求書ごとに選ぶ。送付OKまでに必須
   send_to_email       text,
   note                text,
   -- 宛名（送付OKのときに企業から写す）
@@ -319,6 +322,7 @@ create table public.invoices (
          invoice_no is not null and issue_date is not null and bill_to_name is not null
          and total is not null and tax_rate is not null)),
   check (status in ('draft', 'cancelled') or is_legacy or (send_ok_at is not null and send_ok_by is not null)),
+  check (status in ('draft', 'cancelled') or is_legacy or send_method is not null),
   check (status not in ('sent', 'superseded') or sent_on is not null),
   check (status <> 'cancelled' or (cancelled_at is not null and cancel_reason is not null)),
   check ((revision = 1) = (replaces_invoice_id is null)),
@@ -874,8 +878,9 @@ begin
   if co.id is null then
     raise exception '企業が見つかりません';
   end if;
-  insert into public.invoices (company_id, billing_month, send_method, send_to_email)
-  values (p_company_id, p_billing_month, co.send_method, co.email)
+  -- 送り方は空のまま（請求書ごとに選ぶ）。メールの宛先は企業のものを写しておく
+  insert into public.invoices (company_id, billing_month, send_to_email)
+  values (p_company_id, p_billing_month, co.email)
   returning * into inv;
   if p_request_ids is not null and cardinality(p_request_ids) > 0 then
     update public.billing_requests set invoice_id = inv.id where id = any(p_request_ids);
@@ -956,6 +961,9 @@ begin
   end if;
   if inv.status <> 'draft' then
     raise exception 'この請求書は送付OKにできません（状態：%）', inv.status;
+  end if;
+  if inv.send_method is null then
+    raise exception '送り方（郵送／メール）を選んでください';
   end if;
   if p_fingerprint is distinct from public.invoice_fingerprint(p_invoice_id) then
     raise exception '確認したあとに請求内容が変わっています。画面を読み込み直して、もう一度確認してください';
@@ -1128,12 +1136,12 @@ begin
     raise exception 'この請求書には請求依頼がないため、訂正版を作れません';
   end if;
   insert into public.invoices (company_id, billing_month, invoice_no, revision, replaces_invoice_id,
-                               correction_reason, issue_date, payment_due_date, send_method, send_to_email, note)
+                               correction_reason, issue_date, payment_due_date, send_to_email, note)
   -- 版は、その番号でこれまでに作った版の次（やめた訂正版も版として数える）
   values (old_inv.company_id, old_inv.billing_month, old_inv.invoice_no,
           (select max(revision) + 1 from public.invoices where invoice_no = old_inv.invoice_no and not is_legacy),
           old_inv.id,
-          p_reason, old_inv.issue_date, old_inv.payment_due_date, old_inv.send_method, old_inv.send_to_email, old_inv.note)
+          p_reason, old_inv.issue_date, old_inv.payment_due_date, old_inv.send_to_email, old_inv.note)
   returning * into inv;
   update public.billing_requests set invoice_id = inv.id where invoice_id = old_inv.id;
   return inv;
@@ -1346,7 +1354,8 @@ select i.id, i.company_id, i.invoice_no, i.revision, i.billing_month, i.issue_da
 --   draft       ：下書き（依頼はあるが、まだ送付OKになっていない）
 --   legacy      ：Excelで請求済み
 --   out_of_scope：対象外（契約期間の外、終了した契約のあとの月）
---   unbilled    ：未請求
+--   none        ：請求なし（都度請求・1回だけの契約で、その月に請求がない。漏れではない）
+--   unbilled    ：未請求（毎月請求の契約で、その月の請求がまだない）
 create or replace function public.contract_billing_status(p_from date, p_to date)
 returns table (
   contract_id   uuid,
@@ -1379,6 +1388,7 @@ as $$
              or (c.end_month is not null and mo.m > c.end_month)
              or (c.status = 'ended' and (c.legacy_last_service_month is null or mo.m > c.legacy_last_service_month))
              then 'out_of_scope'
+           when c.kind <> 'monthly' then 'none'
            else 'unbilled'
          end,
          coalesce(si.invoice_no, ci.invoice_no),

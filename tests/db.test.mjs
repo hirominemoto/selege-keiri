@@ -66,8 +66,13 @@ async function request(companyId, contractId, billingMonth, serviceMonth, lines,
   }
   return r.id;
 }
-const draft = async (companyId, month, ids) =>
-  (await one(`select * from public.invoice_create_draft($1, $2, $3)`, [companyId, month, ids])).id;
+// 送り方は請求書ごとに選ぶ（method = null なら選ばないまま）
+const choose = (inv, method) => db.query(`update public.invoices set send_method = $2 where id = $1`, [inv, method]);
+async function draft(companyId, month, ids, method = "post") {
+  const id = (await one(`select * from public.invoice_create_draft($1, $2, $3)`, [companyId, month, ids])).id;
+  if (method) await choose(id, method);
+  return id;
+}
 
 console.log("データベース設計のテスト");
 
@@ -224,7 +229,7 @@ let inv1, reqNov2;
 await test("条件1：下書きのあいだは、明細・依頼・請求書を自由に直せる", async () => {
   reqNov2 = await request(companyId, null, "2026-11-01", null,
     [{ d: "航空券代（非課税）", p: 39537, t: false }]);
-  inv1 = await draft(companyId, "2026-11-01", [reqNov, reqNov2]);
+  inv1 = await draft(companyId, "2026-11-01", [reqNov, reqNov2], null);
   await db.query(`update public.billing_request_lines set description = '一期生2名分：在留サポートサービス：12月分（4回目）' where request_id = $1`, [reqNov]);
   await db.query(`insert into public.billing_request_lines (request_id, sort, description, quantity, unit_price, amount)
                   values ($1, 9, '仮の行', 1, 100, 100)`, [reqNov]);
@@ -237,7 +242,7 @@ await test("条件1：下書きのあいだは、明細・依頼・請求書を�
   const i = await invoice(inv1);
   assert.equal(i.status, "draft");
   assert.equal(i.invoice_no, null);
-  assert.equal(i.send_method, "post");
+  assert.equal(i.send_method, null, "送り方は下書きでは空。請求書ごとに選ぶ");
 });
 
 await test("条件1：別の企業・別の月の請求書には載せられない", async () => {
@@ -258,6 +263,13 @@ await test("条件1：載ったまま依頼の企業・請求月を変えたり�
 // =====================================================================
 // 条件 2：送付OK時点の内容を固定し、変更時は再確認が必要
 // =====================================================================
+
+await test("条件5：送り方（郵送／メール）を選ばないと送付OKにできない", async () => {
+  await rejects(`select public.invoice_send_ok($1, $2)`, [inv1, await fp(inv1)], /送り方/);
+  const f = await fp(inv1);
+  await choose(inv1, "post");
+  await rejects(`select public.invoice_send_ok($1, $2)`, [inv1, f], /もう一度確認/);  // 選んだら指紋も変わる
+});
 
 await test("条件2：確認したあとに内容が変わっていたら、送付OKは止まる", async () => {
   const f = await fp(inv1);
@@ -395,9 +407,12 @@ await test("条件4：請求書を作る依頼は、request_record_sale では�
 
 let invMail;
 
-await test("条件5：送り方は企業から引き継がれ、送付待ちの一覧で郵送とメールに分かれる", async () => {
+await test("条件5：送り方は請求書ごとに選び、送付待ちの一覧で郵送とメールに分かれる", async () => {
   const r = await request(emailCompanyId, null, "2026-11-01", null, [{ d: "在留サポートサービス：11月分", p: 36000 }]);
-  invMail = await draft(emailCompanyId, "2026-11-01", [r]);
+  invMail = await draft(emailCompanyId, "2026-11-01", [r], null);
+  const d = await invoice(invMail);
+  assert.deepEqual([d.send_method, d.send_to_email], [null, "a@example.com"], "企業の「いつもの送り方」は目安。宛先だけ写す");
+  await choose(invMail, "email");
   const i = await sendOk(invMail);
   assert.equal(i.send_method, "email");
   assert.equal(i.send_to_email, "a@example.com");
@@ -480,8 +495,11 @@ await test("訂正版：入金の割り当ては、新しい版が送付OKにな
   await db.query(`insert into public.receipt_allocations (receipt_id, invoice_id, amount) values ($1, $2, 50000)`, [rc.id, inv1]);
   const c = await one(`select * from public.invoice_start_correction($1, '航空券代の金額違い')`, [inv1]);
   inv1v2 = c.id;
+  assert.equal(c.send_method, null, "訂正版の送り方も選び直す");
+  await choose(inv1v2, "email");
   await db.query(`update public.billing_request_lines set unit_price = 40000, amount = 40000 where request_id = $1`, [reqNov2]);
   const v2 = await sendOk(inv1v2);
+  assert.equal(v2.send_method, "email", "前の版は郵送、訂正版はメール、と変えられる");
   // やめた訂正版が第2版として残っているので、これは第3版
   assert.deepEqual([v2.invoice_no, v2.revision, v2.status, v2.total], [no1, 3, "send_ok", 38000 + 3800 + 40000]);
   assert.equal((await invoice(inv1)).status, "superseded");
@@ -537,6 +555,7 @@ await test("訂正版も、送付OKを取り消して直せる。訂正版ごと
   await one(`select * from public.invoice_mark_sent($1)`, [v1]);
   const v2 = (await one(`select * from public.invoice_start_correction($1, '人数違い')`, [v1])).id;
   await db.query(`update public.billing_request_lines set quantity = 3, amount = 114000 where request_id = $1`, [r]);
+  await choose(v2, "post");
   await sendOk(v2);
   const back = await one(`select * from public.invoice_reopen($1, 'もう一度直す')`, [v2]);
   assert.equal(back.status, "draft");
@@ -576,6 +595,17 @@ await test("請求状況：Excelで請求済み／請求済み（番号つき）
   const two = await all(`select service_month, state from public.contract_billing_status('2026-11-01', '2026-12-01')
                           where contract_id = $1 order by service_month`, [contract2Id]);
   assert.deepEqual(two.map((r) => r.state), ["out_of_scope", "draft"]);
+});
+
+await test("請求状況：都度請求の契約は、請求のない月を「未請求」ではなく「請求なし」と出す（三八商店の形）", async () => {
+  const c = await one(`insert into public.contracts (company_id, name, cohort, kind, unit_price, legacy_last_service_month)
+                       values ($1, '受入・定着サポート費', '4期生', 'on_demand', 30000, '2026-07-01') returning id`, [companyId]);
+  const r = await request(companyId, c.id, "2026-10-01", "2026-10-01", [{ d: "4期生：受入・定着サポート費10月分", p: 30000 }]);
+  const rows = await all(`select state from public.contract_billing_status('2026-07-01', '2026-11-01')
+                           where contract_id = $1 order by service_month`, [c.id]);
+  assert.deepEqual(rows.map((x) => x.state), ["legacy", "none", "none", "draft", "none"]);
+  await db.query(`update public.billing_requests set status = 'cancelled' where id = $1`, [r]);
+  await rejects(`insert into public.contracts (company_id, name, kind) values ($1, 'x', 'sometimes')`, [companyId], /check/i);
 });
 
 // =====================================================================

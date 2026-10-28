@@ -24,7 +24,7 @@ export type Contract = {
   company_id: string;
   name: string;
   cohort: string | null;
-  kind: "monthly" | "one_time";
+  kind: "monthly" | "on_demand" | "one_time";
   quantity: number;
   unit_price: number;
   taxable: boolean;

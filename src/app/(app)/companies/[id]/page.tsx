@@ -222,6 +222,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
                       <td className="num">{yen(Math.round(Number(c.quantity) * c.unit_price))}</td>
                       <td>{c.taxable ? "かかる" : "かからない"}</td>
                       <td>
+                        {c.kind === "on_demand" && <div className="small muted">請求するときだけ</div>}
                         {monthName(thisMonth, c.service_month_offset)}分・{countLabel(n, c.total_count, c.count_unit)}
                         {over && (
                           <div>

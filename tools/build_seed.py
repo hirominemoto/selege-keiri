@@ -2,16 +2,19 @@
 確認済みの「取り込み確認_企業と契約.xlsx」から、Supabase に流し込む SQL を作る。
 
 使い方:
-  python3 tools/build_seed.py <確認済み.xlsx> <出力.sql> [--email 社名,社名,...]
+  python3 tools/build_seed.py <確認済み.xlsx> <出力.sql> [--email 社名,社名,...] [--on-demand 社名,社名,...]
 
-  --email：郵送せず、セレッジ担当がメールで直接送る企業（★の企業）。正式名をカンマ区切りで
+  --email：いつもの送り方がメール（セレッジ担当が直接送る★の企業）の企業。正式名をカンマ区切りで
+           実際の送り方は請求書ごとに選ぶので、ここで決めるのは「目安」
+  --on-demand：毎月ではなく、請求するタイミングが来たときだけ請求する（都度請求）契約を持つ企業
 
 出力した SQL は、Supabase の SQL Editor に貼って Run する（0001_init.sql の実行後）。
 取引先の実データなので、出力はリポジトリに入れない（data/private/ に置く）。
 
 ・企業：「企業」シートのすべての行。取引の状態が「取引終了」なら取引終了として入れる
 ・旧Excelの表記ゆれ：正式名と違う表記を company_aliases に入れる
-・企業の送り方：--email に挙げた企業（または「企業」シートの「送り方」列が「メール」の企業）はメール、ほかは郵送
+・企業のいつもの送り方（目安）：--email に挙げた企業（または「企業」シートの「送り方」列が「メール」の企業）はメール、ほかは郵送
+・契約の請求のしかた：--on-demand に挙げた企業の契約（または「契約」シートの「請求のしかた」列が「都度」の契約）は都度請求、ほかは毎月
 ・契約：「契約」シートで「取り込む」が「はい」の行。全回数に達しているものは「終了」で入れる
 ・契約の「Excelで請求済みの最後の◯月分」：最後の請求日と最後の品名から決める
     品名に「◯月分」がある → その月（翌月分を前請求なら、請求日より後の月として年を決める）
@@ -93,8 +96,10 @@ def make_template(desc, has_month):
     return to_fullwidth_punct(t.strip())
 
 
-def main(src, out_path, email_companies=()):
+def main(src, out_path, email_companies=(), on_demand_companies=()):
     email_companies = {n.strip() for n in email_companies if n.strip()}
+    on_demand_companies = {n.strip() for n in on_demand_companies if n.strip()}
+    on_demand_found = set()
     wb = openpyxl.load_workbook(src, data_only=True)
     lines = [
         "-- セレッジ管理システム：旧Excelからの取り込み（企業・表記ゆれ・契約）",
@@ -154,13 +159,17 @@ def main(src, out_path, email_companies=()):
         count_unit = "か月" if re.search(r"(か月|ヶ月|ケ月)目", desc) else "回"
         finished = last is not None and total is not None and int(last) >= int(total)
         cohort = row[idx["期"]]
+        on_demand = company in on_demand_companies or (
+            "請求のしかた" in idx and "都度" in str(row[idx["請求のしかた"]] or ""))
+        if on_demand:
+            on_demand_found.add(company)
         legacy = legacy_last_service_month(row[idx["最後の請求日"]], desc, relation)
         legacy_sql = f"'{legacy:%Y-%m-%d}'" if legacy else "null"
         lines.append(
             "insert into public.contracts (company_id, name, cohort, kind, quantity, unit_price, taxable, "
             "service_month_offset, total_count, count_unit, base_count, legacy_last_service_month, status, "
             "description_template, note) "
-            f"select co.id, {q(row[idx['契約名']])}, {q(cohort)}, 'monthly', {num(row[idx['人数']]) if row[idx['人数']] else 1}, "
+            f"select co.id, {q(row[idx['契約名']])}, {q(cohort)}, {q('on_demand' if on_demand else 'monthly')}, {num(row[idx['人数']]) if row[idx['人数']] else 1}, "
             f"{num(row[idx['単価（税抜）']])}, true, {offset}, {num(total)}, {q(count_unit)}, {num(last) if last else 0}, "
             f"{legacy_sql}, {q('ended' if finished else 'active')}, {q(make_template(desc, has_month))}, "
             f"{q('旧Excelから取り込み。最後の請求：' + date_text(row[idx['最後の請求日']]))} "
@@ -173,21 +182,33 @@ def main(src, out_path, email_companies=()):
     lines += ["", "commit;", ""]
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print(f"企業 {n_company} 件（うちメール送付 {n_email} 件）、表記ゆれ {n_alias} 件、契約 {n_contract} 件の SQL を書き出しました → {out_path}")
+    print(f"企業 {n_company} 件（うち、いつもの送り方がメール {n_email} 件）、表記ゆれ {n_alias} 件、契約 {n_contract} 件の SQL を書き出しました → {out_path}")
+    print(f"都度請求の契約がある企業：{'、'.join(sorted(on_demand_found)) or 'なし'}")
     missing = email_companies - email_found
-    if missing:
-        print("※ --email に挙げたが「企業」シートに見つからない企業：" + "、".join(sorted(missing)))
+    missing_od = on_demand_companies - on_demand_found
+    if missing or missing_od:
+        if missing:
+            print("※ --email に挙げたが「企業」シートに見つからない企業：" + "、".join(sorted(missing)))
+        if missing_od:
+            print("※ --on-demand に挙げたが「契約」シートに見つからない企業：" + "、".join(sorted(missing_od)))
         sys.exit(2)
 
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    emails = []
-    if "--email" in args:
-        i = args.index("--email")
-        emails = args[i + 1].replace("、", ",").split(",") if i + 1 < len(args) else []
+
+    def take(flag):
+        global args
+        if flag not in args:
+            return []
+        i = args.index(flag)
+        vals = args[i + 1].replace("、", ",").split(",") if i + 1 < len(args) else []
         args = args[:i] + args[i + 2:]
+        return vals
+
+    emails = take("--email")
+    on_demand = take("--on-demand")
     if len(args) != 2:
         print(__doc__)
         sys.exit(1)
-    main(args[0], args[1], emails)
+    main(args[0], args[1], emails, on_demand)

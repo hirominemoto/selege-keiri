@@ -66,11 +66,15 @@ export function ContractForm({ companyId, companyName, contract, maxCountInApp =
             <input id="cohort" name="cohort" type="text" value={cohort} onChange={(ev) => setCohort(ev.target.value)} />
           </Field>
         </div>
-        <Field label="請求のしかた" name="kind" asGroup>
+        <Field label="請求のしかた" name="kind" asGroup hint="「都度」は、請求のない月があっても未請求として扱いません">
           <div className="choices" role="radiogroup" aria-labelledby="kind-label">
             <label className="choice">
               <input type="radio" name="kind" value="monthly" defaultChecked={(c?.kind ?? "monthly") === "monthly"} />
-              毎月
+              毎月（分割・月額）
+            </label>
+            <label className="choice">
+              <input type="radio" name="kind" value="on_demand" defaultChecked={c?.kind === "on_demand"} />
+              都度（請求するときだけ）
             </label>
             <label className="choice">
               <input type="radio" name="kind" value="one_time" defaultChecked={c?.kind === "one_time"} />

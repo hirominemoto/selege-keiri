@@ -48,4 +48,8 @@ export const contractStatusLabel: Record<string, string> = {
   paused: "休止中",
   ended: "終了",
 };
-export const contractKindLabel: Record<string, string> = { monthly: "毎月", one_time: "1回だけ" };
+export const contractKindLabel: Record<string, string> = {
+  monthly: "毎月（分割・月額）",
+  on_demand: "都度（請求するときだけ）",
+  one_time: "1回だけ",
+};

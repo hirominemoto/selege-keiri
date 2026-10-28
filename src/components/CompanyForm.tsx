@@ -61,7 +61,7 @@ export function CompanyForm({ company }: { company?: Company }) {
 
       <div className="form-section">
         <h2>請求書の送り方と入金予定</h2>
-        <Field label="いつもの送り方" name="send_method" asGroup>
+        <Field label="いつもの送り方" name="send_method" asGroup hint="目安です。実際の送り方は請求書ごとに選びます">
           <div className="choices" role="radiogroup" aria-labelledby="send_method-label">
             <label className="choice">
               <input type="radio" name="send_method" value="post" defaultChecked={(c?.send_method ?? "post") === "post"} />
