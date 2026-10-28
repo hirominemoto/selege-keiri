@@ -1,0 +1,115 @@
+# セレッジ 請求・支払・収支管理システム
+
+セレッジで使っていた4本のExcel（社内申込書ツール・売上表・売上支払一覧・月末支払い管理）を、1つのWebアプリにまとめる。
+担当者が変わっても、経理の専門知識がなくても、請求・支払・収支管理を正確に続けられることが目的。
+
+- 設計書：Claude Docs「セレッジ管理システム 技術レビューと基本設計案」
+- 仕様書：ペチ作成「GoGo実装依頼用 統合仕様書 v0.3」
+
+## いまできること
+
+| 機能 | 状態 |
+| --- | --- |
+| ログイン（招待した人だけ） | できた |
+| 企業の登録・変更（宛名・住所・送り方・入金予定） | できた |
+| 契約の登録・変更（人数・単価・消費税・◯月分・回数・品名のひな形） | できた |
+| 変更履歴（だれが・いつ・何を） | できた |
+| データベース全体（請求・売上・請求書・入金・支払い・固定費） | できた（画面はこれから） |
+| 今月の請求・請求書PDF | これから |
+| 支払い管理・総務への依頼 | これから |
+| 入金・収支サマリ | これから |
+
+## 使う人と役割
+
+| 役割 | できること |
+| --- | --- |
+| 管理者（admin） | すべての入力・変更 |
+| 閲覧（viewer） | 見るだけ（社長など） |
+| 承認待ち（pending） | 何も見られない。管理者が役割を決めるまでの状態 |
+
+最初に登録した1人が自動で管理者になる。2人目からは承認待ちになるので、管理者が役割を変える。
+
+---
+
+## はじめの準備（1回だけ）
+
+### 1. Supabase のプロジェクトを作る
+
+1. https://supabase.com にログインし、**New project** を押す
+2. **Name**：`selege-keiri`
+3. **Database Password**：長いパスワードを作り、パスワード管理ツールに保存する（あとで使うことはほぼない）
+4. **Region**：**Northeast Asia (Tokyo)**
+5. **Create new project** を押し、準備ができるまで1〜2分待つ
+
+### 2. データベースの表を作る
+
+1. 左のメニューの **SQL Editor** を開く
+2. **New query** を押す
+3. このリポジトリの `supabase/migrations/0001_init.sql` の中身をすべて貼り付ける
+4. 右下の **Run** を押す。「Success. No rows returned」と出ればOK
+
+### 3. 勝手にアカウントを作れないようにする
+
+1. 左のメニューの **Authentication** を開く
+2. **Sign In / Providers**（画面によっては **Providers** や **Settings**）を開く
+3. **Allow new users to sign up** をオフにして保存する
+
+### 4. 自分のアカウントを作る（最初の1人＝管理者）
+
+1. **Authentication** → **Users** を開く
+2. **Add user** → **Create new user** を押す
+3. メールアドレスとパスワードを入れ、**Auto Confirm User** にチェックを入れて作成する
+
+### 5. Vercel に設定を入れる
+
+1. Supabase の **Project Settings** → **API**（画面によっては **API Keys** と **Data API**）を開く
+2. **Project URL** と **anon public**（または **publishable**）キーをコピーする
+3. Vercel でこのリポジトリをインポートし、**Settings** → **Environment Variables** に次の2つを入れる
+
+| 名前 | 値 |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | Project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon public（publishable）キー |
+
+4. **Deployments** から再デプロイする
+
+`service_role`（secret）キーはこのアプリでは使わない。どこにも貼らないこと。
+
+### 社長など、見るだけの人を追加するとき
+
+1. 上の「4.」と同じ手順でアカウントを作る（この人は承認待ちになる）
+2. Supabase の **Table Editor** → `profiles` を開く
+3. その人の行の `role` を `viewer` に変えて保存する
+
+---
+
+## 開発する人向け
+
+```bash
+npm install
+cp .env.example .env.local   # 値を入れる
+npm run dev                  # http://localhost:3000
+npm run test:db              # データベース設計のテスト（PGlite で本物の PostgreSQL を動かす）
+npm run lint
+npm run build
+```
+
+### フォルダ
+
+| 場所 | 中身 |
+| --- | --- |
+| `supabase/migrations/` | データベースの設計（SQL） |
+| `tests/db.test.mjs` | データベースのルールのテスト |
+| `src/app/` | 画面 |
+| `src/lib/` | 共通の処理（入力チェック、表示の整形、品名の組み立て） |
+| `tools/extract_import.py` | 旧Excelから取り込み候補を取り出す |
+| `data/private/` | 取引先の実データ置き場。**Git に入れない** |
+
+### 大事なルール（設計書より）
+
+- 売上台帳（`sales`）が売上の正本。請求書・入金はそこにぶら下げる
+- 同じ支出を `payables` と `monthly_costs` の両方に入れない（家賃は `payables`）
+- 金額は円の整数。消費税は請求書ごとに1回だけ計算し、端数の扱いは `calc_tax` と設定で決める
+- 発行済みの請求書は書き換えない。直すときは取消して再発行
+- 前月の請求内容を自動で確定しない。ひな形は出すが、確定は人が行う
+- 業務ルールが決まっていないことは、仮のルールで固めない（設計書の確認事項を参照）
