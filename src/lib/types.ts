@@ -32,6 +32,7 @@ export type Contract = {
   total_count: number | null;
   count_unit: "回" | "か月";
   base_count: number;
+  legacy_last_service_month: string | null; // 旧Excelで請求済みの最後の「◯月分」
   start_month: string | null;
   end_month: string | null;
   status: "active" | "paused" | "ended";

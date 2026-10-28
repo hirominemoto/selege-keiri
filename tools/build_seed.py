@@ -2,14 +2,20 @@
 確認済みの「取り込み確認_企業と契約.xlsx」から、Supabase に流し込む SQL を作る。
 
 使い方:
-  python3 tools/build_seed.py <確認済み.xlsx> <出力.sql>
+  python3 tools/build_seed.py <確認済み.xlsx> <出力.sql> [--email 社名,社名,...]
+
+  --email：郵送せず、セレッジ担当がメールで直接送る企業（★の企業）。正式名をカンマ区切りで
 
 出力した SQL は、Supabase の SQL Editor に貼って Run する（0001_init.sql の実行後）。
 取引先の実データなので、出力はリポジトリに入れない（data/private/ に置く）。
 
 ・企業：「企業」シートのすべての行。取引の状態が「取引終了」なら取引終了として入れる
 ・旧Excelの表記ゆれ：正式名と違う表記を company_aliases に入れる
+・企業の送り方：--email に挙げた企業（または「企業」シートの「送り方」列が「メール」の企業）はメール、ほかは郵送
 ・契約：「契約」シートで「取り込む」が「はい」の行。全回数に達しているものは「終了」で入れる
+・契約の「Excelで請求済みの最後の◯月分」：最後の請求日と最後の品名から決める
+    品名に「◯月分」がある → その月（翌月分を前請求なら、請求日より後の月として年を決める）
+    品名に「◯月分」がない → 最後の請求日の月
 ・同じ名前の企業・同じ企業の同じ契約（契約名と期）がすでにあれば入れない（何度実行しても重複しない）
 """
 
@@ -37,10 +43,38 @@ def num(v):
     return str(int(round(float(unicodedata.normalize("NFKC", str(v)).replace(",", "")))))
 
 
+def to_date(v):
+    """セルの日付を date に。文字の日付（「2026/10/31」や打ち間違いの「202512/31」）も読む"""
+    if isinstance(v, dt.datetime):
+        return v.date()
+    if isinstance(v, dt.date):
+        return v
+    digits = re.sub(r"\D", "", unicodedata.normalize("NFKC", str(v or "")))
+    if len(digits) == 8:
+        return dt.date(int(digits[:4]), int(digits[4:6]), int(digits[6:]))
+    return None
+
+
 def date_text(v):
-    if isinstance(v, (dt.datetime, dt.date)):
-        return f"{v:%Y/%m/%d}"
-    return str(v or "")
+    d = to_date(v)
+    return f"{d:%Y/%m/%d}" if d else str(v or "")
+
+
+def legacy_last_service_month(last_billed, desc, relation):
+    """Excelで請求済みの最後の「◯月分」（その月の1日）。決められなければ None"""
+    billed = to_date(last_billed)
+    if billed is None:
+        return None
+    m = re.search(r"(\d{1,2})月分", unicodedata.normalize("NFKC", desc or ""))
+    if m and "なし" not in (relation or ""):
+        month = int(m.group(1))
+        year = billed.year
+        if "翌月" in (relation or "") and month < billed.month:
+            year += 1          # 12月に1月分を請求したとき
+        elif "翌月" not in (relation or "") and month > billed.month:
+            year -= 1          # 念のため（請求月より先の月分は前の年とみなす）
+        return dt.date(year, month, 1)
+    return dt.date(billed.year, billed.month, 1)
 
 
 def to_fullwidth_punct(s):
@@ -59,7 +93,8 @@ def make_template(desc, has_month):
     return to_fullwidth_punct(t.strip())
 
 
-def main(src, out_path):
+def main(src, out_path, email_companies=()):
+    email_companies = {n.strip() for n in email_companies if n.strip()}
     wb = openpyxl.load_workbook(src, data_only=True)
     lines = [
         "-- セレッジ管理システム：旧Excelからの取り込み（企業・表記ゆれ・契約）",
@@ -72,17 +107,23 @@ def main(src, out_path):
     ws = wb["企業"]
     head = [c.value for c in ws[1]]
     idx = {h: i for i, h in enumerate(head)}
-    n_company = n_alias = 0
+    n_company = n_alias = n_email = 0
+    email_found = set()
     for row in ws.iter_rows(min_row=2, values_only=True):
         name = row[idx["正式名"]]
         if not name:
             continue
         name = str(name).strip()
         active = (row[idx["取引の状態"]] or "取引中") != "取引終了"
+        by_email = name in email_companies or (
+            "送り方" in idx and "メール" in str(row[idx["送り方"]] or ""))
+        if by_email:
+            n_email += 1
+            email_found.add(name)
         lines.append(
-            "insert into public.companies (name, postal_code, address1, contact_name, is_active) values "
+            "insert into public.companies (name, postal_code, address1, contact_name, send_method, is_active) values "
             f"({q(name)}, {q(row[idx['郵便番号']])}, {q(row[idx['住所']])}, {q(row[idx['部署・担当者']])}, "
-            f"{'true' if active else 'false'}) on conflict (name) do nothing;"
+            f"{q('email' if by_email else 'post')}, {'true' if active else 'false'}) on conflict (name) do nothing;"
         )
         n_company += 1
         variants = [v.strip() for v in str(row[idx["Excelでの表記"]] or "").split("、") if v.strip()]
@@ -113,12 +154,15 @@ def main(src, out_path):
         count_unit = "か月" if re.search(r"(か月|ヶ月|ケ月)目", desc) else "回"
         finished = last is not None and total is not None and int(last) >= int(total)
         cohort = row[idx["期"]]
+        legacy = legacy_last_service_month(row[idx["最後の請求日"]], desc, relation)
+        legacy_sql = f"'{legacy:%Y-%m-%d}'" if legacy else "null"
         lines.append(
             "insert into public.contracts (company_id, name, cohort, kind, quantity, unit_price, taxable, "
-            "service_month_offset, total_count, count_unit, base_count, status, description_template, note) "
+            "service_month_offset, total_count, count_unit, base_count, legacy_last_service_month, status, "
+            "description_template, note) "
             f"select co.id, {q(row[idx['契約名']])}, {q(cohort)}, 'monthly', {num(row[idx['人数']]) if row[idx['人数']] else 1}, "
             f"{num(row[idx['単価（税抜）']])}, true, {offset}, {num(total)}, {q(count_unit)}, {num(last) if last else 0}, "
-            f"{q('ended' if finished else 'active')}, {q(make_template(desc, has_month))}, "
+            f"{legacy_sql}, {q('ended' if finished else 'active')}, {q(make_template(desc, has_month))}, "
             f"{q('旧Excelから取り込み。最後の請求：' + date_text(row[idx['最後の請求日']]))} "
             f"from public.companies co where co.name = {q(company)} "
             "and not exists (select 1 from public.contracts c where c.company_id = co.id "
@@ -129,11 +173,21 @@ def main(src, out_path):
     lines += ["", "commit;", ""]
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print(f"企業 {n_company} 件、表記ゆれ {n_alias} 件、契約 {n_contract} 件の SQL を書き出しました → {out_path}")
+    print(f"企業 {n_company} 件（うちメール送付 {n_email} 件）、表記ゆれ {n_alias} 件、契約 {n_contract} 件の SQL を書き出しました → {out_path}")
+    missing = email_companies - email_found
+    if missing:
+        print("※ --email に挙げたが「企業」シートに見つからない企業：" + "、".join(sorted(missing)))
+        sys.exit(2)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    args = sys.argv[1:]
+    emails = []
+    if "--email" in args:
+        i = args.index("--email")
+        emails = args[i + 1].replace("、", ",").split(",") if i + 1 < len(args) else []
+        args = args[:i] + args[i + 2:]
+    if len(args) != 2:
         print(__doc__)
         sys.exit(1)
-    main(sys.argv[1], sys.argv[2])
+    main(args[0], args[1], emails)

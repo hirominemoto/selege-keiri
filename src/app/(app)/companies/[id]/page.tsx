@@ -76,13 +76,21 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
 
   const [{ data: contractData }, { data: requestData }, { data: aliasData }] = await Promise.all([
     supabase.from("contracts").select("*").eq("company_id", id).order("status").order("name").order("cohort"),
-    supabase.from("billing_requests").select("contract_id, status").eq("company_id", id).in("status", ["confirmed", "invoiced"]),
+    supabase
+      .from("billing_requests")
+      .select("contract_id, count_no")
+      .eq("company_id", id)
+      .eq("kind", "normal")
+      .eq("status", "active"),
     supabase.from("company_aliases").select("alias").eq("company_id", id).order("alias"),
   ]);
   const contracts = (contractData ?? []) as Contract[];
-  const confirmedCount = new Map<string, number>();
+  // 契約ごとの、アプリで請求した最大の回数
+  const maxCount = new Map<string, number>();
   for (const r of requestData ?? []) {
-    if (r.contract_id) confirmedCount.set(r.contract_id, (confirmedCount.get(r.contract_id) ?? 0) + 1);
+    if (r.contract_id && r.count_no !== null) {
+      maxCount.set(r.contract_id, Math.max(maxCount.get(r.contract_id) ?? 0, r.count_no));
+    }
   }
 
   // 変更履歴（管理者だけ見られる）
@@ -200,7 +208,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
               </thead>
               <tbody>
                 {contracts.map((c) => {
-                  const n = nextCount(c.base_count, confirmedCount.get(c.id) ?? 0);
+                  const n = nextCount(c.base_count, maxCount.get(c.id) ?? null);
                   const over = c.total_count !== null && n > c.total_count;
                   return (
                     <tr key={c.id}>

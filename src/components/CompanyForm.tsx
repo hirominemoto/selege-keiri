@@ -69,7 +69,7 @@ export function CompanyForm({ company }: { company?: Company }) {
             </label>
             <label className="choice">
               <input type="radio" name="send_method" value="email" defaultChecked={c?.send_method === "email"} />
-              メール
+              メール（セレッジ担当が送付）
             </label>
           </div>
         </Field>

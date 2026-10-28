@@ -30,7 +30,10 @@ export function monthName(billingMonth: string, offset: number): string {
   return `${d.getUTCMonth() + 1}月`;
 }
 
-/** 次に請求するときの回数（アプリ導入前の回数 + アプリで確定した数 + 1） */
-export function nextCount(baseCount: number, confirmedInApp: number): number {
-  return baseCount + confirmedInApp + 1;
+/**
+ * 次に請求するときの回数の候補
+ * （アプリ導入前の回数と、アプリで請求した最大の回数の大きいほう + 1。データベースの next_count_no と同じ考え方）
+ */
+export function nextCount(baseCount: number, maxCountInApp: number | null): number {
+  return Math.max(baseCount, maxCountInApp ?? 0) + 1;
 }
