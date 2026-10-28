@@ -106,6 +106,8 @@ npm run build
 
 | 場所 | 中身 |
 | --- | --- |
+| `docs/decisions.md` | 決まった業務ルールと、まだ決めていないこと |
+| `docs/excel-structure.md` | 旧Excel 4本の作り（解析メモ）。原本は不明点が出たときだけ開く |
 | `supabase/migrations/` | データベースの設計（SQL） |
 | `tests/db.test.mjs` | データベースのルールのテスト |
 | `src/app/` | 画面 |
