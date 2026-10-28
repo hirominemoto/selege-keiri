@@ -48,6 +48,14 @@
 3. このリポジトリの `supabase/migrations/0001_init.sql` の中身をすべて貼り付ける
 4. 右下の **Run** を押す。「Success. No rows returned」と出ればOK
 
+### 2-2. 旧Excelの企業と契約を取り込む
+
+1. ひろみが確認した「取り込み確認_企業と契約」から作った `seed_import.sql` を用意する（取引先の実データなので GitHub には置かない）
+2. **SQL Editor** → **New query** に中身をすべて貼り付けて **Run** を押す
+3. 何度実行しても、同じ企業・同じ契約は二重に入らない
+
+作り直すとき：`python3 tools/build_seed.py <確認済み.xlsx> data/private/seed_import.sql`
+
 ### 3. 勝手にアカウントを作れないようにする
 
 1. 左のメニューの **Authentication** を開く
