@@ -377,7 +377,7 @@ await test("条件3：売上を作れるのは送付OKの処理だけ（送付OK
 let noInvReq;
 
 await test("条件4：請求書を作らない依頼は、送付OKなしで売上になる（2回押しても1件）", async () => {
-  const koka = await one(`insert into public.companies (name) values ('甲賀市') returning id`);
+  const koka = await one(`insert into public.companies (name) values ('テスト市') returning id`);
   noInvReq = await request(koka.id, null, "2026-11-01", null, [{ d: "研修費（税込で受領）", p: 110000 }], { needsInvoice: false });
   const s1 = await one(`select * from public.request_record_sale($1)`, [noInvReq]);
   const s2 = await one(`select * from public.request_record_sale($1)`, [noInvReq]);
@@ -388,7 +388,7 @@ await test("条件4：請求書を作らない依頼は、送付OKなしで売�
 });
 
 await test("条件4：請求書を作らない依頼は請求書に載せられず、売上にしたあとは固まる", async () => {
-  const koka = await one(`select id from public.companies where name = '甲賀市'`);
+  const koka = await one(`select id from public.companies where name = 'テスト市'`);
   const d = await draft(koka.id, "2026-11-01", []);
   await rejects(`update public.billing_requests set invoice_id = $2 where id = $1`, [noInvReq, d], /check|送付OKのあと|載せられません/);
   await rejects(`update public.billing_request_lines set description = 'x' where request_id = $1`, [noInvReq], /送付OKのあと/);
@@ -548,7 +548,7 @@ await test("取消：請求書は削除できない。旧版は取消せない",
 });
 
 await test("訂正版も、送付OKを取り消して直せる。訂正版ごと取消すと依頼は請求書から外れる", async () => {
-  const baba = (await one(`insert into public.companies (name) values ('株式会社ババ') returning id`)).id;
+  const baba = (await one(`insert into public.companies (name) values ('株式会社訂正テスト') returning id`)).id;
   const r = await request(baba, null, "2026-11-01", null, [{ d: "2名分：在留サポートサービス：12月分", q: 2, p: 38000 }]);
   const v1 = await draft(baba, "2026-11-01", [r]);
   await sendOk(v1);
@@ -597,7 +597,7 @@ await test("請求状況：Excelで請求済み／請求済み（番号つき）
   assert.deepEqual(two.map((r) => r.state), ["out_of_scope", "draft"]);
 });
 
-await test("請求状況：都度請求の契約は、請求のない月を「未請求」ではなく「請求なし」と出す（三八商店の形）", async () => {
+await test("請求状況：都度請求の契約は、請求のない月を「未請求」ではなく「請求なし」と出す", async () => {
   const c = await one(`insert into public.contracts (company_id, name, cohort, kind, unit_price, legacy_last_service_month)
                        values ($1, '受入・定着サポート費', '4期生', 'on_demand', 30000, '2026-07-01') returning id`, [companyId]);
   const r = await request(companyId, c.id, "2026-10-01", "2026-10-01", [{ d: "4期生：受入・定着サポート費10月分", p: 30000 }]);

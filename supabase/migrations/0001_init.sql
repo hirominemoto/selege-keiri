@@ -408,7 +408,7 @@ create table public.billing_requests (
   billing_month     date not null check (public.is_month_start(billing_month)),  -- 請求する月
   service_month     date check (public.is_month_start(service_month)),          -- 「◯月分」
   count_no          integer check (count_no > 0),                                -- 何回目か
-  needs_invoice     boolean not null default true,     -- false=請求書を作らない売上（甲賀市など）
+  needs_invoice     boolean not null default true,     -- false=請求書を作らない売上（税込で受け取る自治体など）
   invoice_id        uuid references public.invoices(id),  -- 載っている請求書（いまの版）
   status            text not null default 'active' check (status in ('active', 'cancelled')),
   note              text,
