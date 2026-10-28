@@ -384,7 +384,8 @@ begin
   values (p, 1)
   on conflict (prefix) do update set last_seq = c.last_seq + 1
   returning last_seq into seq;
-  return p || '-' || lpad(seq::text, 2, '0');
+  -- 2桁にそろえる。100枚目からは3桁のまま（lpad は長い値を切り詰めるので、桁数を合わせて渡す）
+  return p || '-' || lpad(seq::text, greatest(2, length(seq::text)), '0');
 end;
 $$;
 
@@ -602,8 +603,14 @@ begin
     end if;
   end if;
 
-  -- 請求書に載せる・付け替えるとき
-  if new.invoice_id is not null and (tg_op = 'INSERT' or new.invoice_id is distinct from old.invoice_id) then
+  -- 請求書に載せる・付け替えるとき、載ったまま企業・請求月・請求書の要否を変えるとき
+  if new.invoice_id is not null and (
+       tg_op = 'INSERT'
+       or new.invoice_id is distinct from old.invoice_id
+       or new.company_id is distinct from old.company_id
+       or new.billing_month is distinct from old.billing_month
+       or new.needs_invoice is distinct from old.needs_invoice
+       or new.status is distinct from old.status) then
     select * into tgt from public.invoices where id = new.invoice_id;
     if tg_op = 'UPDATE' and old.invoice_id is not null then
       select * into cur from public.invoices where id = old.invoice_id;
@@ -696,6 +703,10 @@ begin
     if old.status = 'draft' then
       if new.invoice_no is distinct from old.invoice_no then
         raise exception '請求書番号は送付OKのときに自動で付きます';
+      end if;
+      if new.billing_month is distinct from old.billing_month
+         and exists (select 1 from public.billing_requests where invoice_id = old.id) then
+        raise exception '依頼が載っている請求書の請求月は変えられません。依頼を外してから変えてください';
       end if;
       return new;
     end if;
@@ -890,6 +901,8 @@ as $$
                   'contact', c.contact_name, 'due_m', c.payment_due_months, 'due_d', c.payment_due_day)
                 from public.invoices i join public.companies c on c.id = i.company_id
                 where i.id = p_invoice_id),
+    'tax', jsonb_build_object('rate', public.setting_text('tax_rate', '0.10'),
+                              'rounding', public.setting_text('tax_rounding', 'ceil')),
     'requests', (select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'v', r.version) order by r.id), '[]')
                    from public.billing_requests r where r.invoice_id = p_invoice_id),
     'lines', (select coalesce(jsonb_agg(jsonb_build_object(
@@ -966,8 +979,9 @@ begin
   -- 依頼ごとに売上を作り、明細を写す
   for r in select * from public.billing_requests where invoice_id = p_invoice_id order by created_at, id for update loop
     n_req := n_req + 1;
-    if r.status <> 'active' or not r.needs_invoice then
-      raise exception 'この請求書には載せられない依頼が入っています';
+    if r.status <> 'active' or not r.needs_invoice
+       or r.company_id <> inv.company_id or r.billing_month <> inv.billing_month then
+      raise exception 'この請求書には載せられない依頼が入っています（企業・請求月・状態を確かめてください）';
     end if;
     if not exists (select 1 from public.billing_request_lines where request_id = r.id) then
       raise exception '明細のない依頼があります';

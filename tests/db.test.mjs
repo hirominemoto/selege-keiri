@@ -203,6 +203,13 @@ await test("請求書番号は月ごとに 01 から重ならずに続く", asyn
   assert.deepEqual([a.n, b.n, c.n], ["2709-01", "2709-02", "2710-01"]);
 });
 
+await test("請求書番号は100枚目からも桁を落とさない（2710-10 と重ならない）", async () => {
+  await db.query(`insert into public.invoice_counters (prefix, last_seq) values ('2705', 99)`);
+  const a = await one(`select public.next_invoice_no('2027-05-01') as n`);
+  const b = await one(`select public.next_invoice_no('2027-05-01') as n`);
+  assert.deepEqual([a.n, b.n], ["2705-100", "2705-101"]);
+});
+
 await test("下書きの請求書に番号は付けられない（番号は送付OKで自動）", async () => {
   await rejects(`insert into public.invoices (company_id, billing_month, invoice_no) values ($1, '2026-11-01', '2711-99')`,
                 [companyId], /送付OKのときに自動/);
@@ -241,6 +248,13 @@ await test("条件1：別の企業・別の月の請求書には載せられな�
   await db.query(`delete from public.invoices where id in ($1, $2)`, [other, dec]);  // 番号のない下書きは消せる
 });
 
+await test("条件1：載ったまま依頼の企業・請求月を変えたり、請求書の月だけ変えたりはできない", async () => {
+  await rejects(`update public.billing_requests set company_id = $2 where id = $1`, [reqNov2, emailCompanyId], /別の企業/);
+  await rejects(`update public.billing_requests set billing_month = '2026-12-01' where id = $1`, [reqNov2], /請求月/);
+  await rejects(`update public.billing_requests set needs_invoice = false where id = $1`, [reqNov2], /check|載せられません/);
+  await rejects(`update public.invoices set billing_month = '2026-12-01' where id = $1`, [inv1], /請求月は変えられません/);
+});
+
 // =====================================================================
 // 条件 2：送付OK時点の内容を固定し、変更時は再確認が必要
 // =====================================================================
@@ -253,6 +267,14 @@ await test("条件2：確認したあとに内容が変わっていたら、送�
   await db.query(`update public.companies set address1 = '大阪府堺市2-2' where id = $1`, [companyId]);
   await rejects(`select public.invoice_send_ok($1, $2)`, [inv1, f], /もう一度確認/);
   await rejects(`select public.invoice_send_ok($1, null)`, [inv1], /もう一度確認/);
+});
+
+await test("条件2：確認したあとに税率・端数処理の設定が変わっても、送付OKは止まる", async () => {
+  const f = await fp(inv1);
+  await db.query(`update public.app_settings set value = '"floor"' where key = 'tax_rounding'`);
+  await rejects(`select public.invoice_send_ok($1, $2)`, [inv1, f], /もう一度確認/);
+  await db.query(`update public.app_settings set value = '"ceil"' where key = 'tax_rounding'`);
+  assert.equal(await fp(inv1), f, "元に戻せば同じ指紋");
 });
 
 let no1;
@@ -604,12 +626,13 @@ await test("消費税：切り上げ・切り捨て・四捨五入", async () =>
 });
 
 await test("設定の変更も履歴に残る。暦年に切り替えると番号の頭も変わる", async () => {
+  const before = (await one(`select count(*)::int as n from public.audit_log where table_name = 'app_settings'`)).n;
   await db.query(`update public.app_settings set value = '"calendar"' where key = 'invoice_no_year'`);
   const r = await one(`select public.invoice_no_prefix('2026-11-01') as p`);
   assert.equal(r.p, "2611");
   await db.query(`update public.app_settings set value = '"fiscal_end"' where key = 'invoice_no_year'`);
   const n = await one(`select count(*)::int as n from public.audit_log where table_name = 'app_settings'`);
-  assert.equal(n.n, 2);
+  assert.equal(n.n - before, 2);
 });
 
 await test("すべての業務テーブルでアクセス制御（RLS）が有効", async () => {
