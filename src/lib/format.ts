@@ -42,10 +42,14 @@ export function countLabel(n: number, total: number | null, unit: string): strin
   return total ? `${head}／全${total}${unit === "か月" ? "か月" : "回"}` : head;
 }
 
-export const sendMethodLabel: Record<string, string> = { post: "郵送", email: "メール" };
+export const sendMethodLabel: Record<string, string> = { post: "郵送", email: "メール（セレッジ担当が送付）" };
 export const contractStatusLabel: Record<string, string> = {
   active: "継続中",
   paused: "休止中",
   ended: "終了",
 };
-export const contractKindLabel: Record<string, string> = { monthly: "毎月", one_time: "1回だけ" };
+export const contractKindLabel: Record<string, string> = {
+  monthly: "毎月（分割・月額）",
+  on_demand: "都度（請求するときだけ）",
+  one_time: "1回だけ",
+};

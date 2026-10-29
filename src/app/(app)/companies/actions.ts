@@ -98,7 +98,7 @@ export async function saveContract(_prev: FormState, fd: FormData): Promise<Form
   const companyId = text(fd, "company_id");
   if (!companyId) return { ok: false, message: "企業が指定されていません" };
 
-  const kind = choice(fd, "kind", ["monthly", "one_time"] as const, "monthly");
+  const kind = choice(fd, "kind", ["monthly", "on_demand", "one_time"] as const, "monthly");
   const values = {
     company_id: companyId,
     name: requiredText(fd, "name", "契約名", errs),

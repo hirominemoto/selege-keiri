@@ -13,11 +13,11 @@ type Props = {
   companyId: string;
   companyName: string;
   contract?: Contract;
-  confirmedInApp?: number; // アプリで確定済みの請求の数
+  maxCountInApp?: number | null; // アプリで請求した最大の回数
   exampleMonth: string; // 例として使う請求月（"2026-11-01"）
 };
 
-export function ContractForm({ companyId, companyName, contract, confirmedInApp = 0, exampleMonth }: Props) {
+export function ContractForm({ companyId, companyName, contract, maxCountInApp = null, exampleMonth }: Props) {
   const [state, action, pending] = useActionState(saveContract, {});
   const e = state.errors ?? {};
   const c = contract;
@@ -34,7 +34,7 @@ export function ContractForm({ companyId, companyName, contract, confirmedInApp 
 
   const num = (s: string) => Number(s.replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0)).replace(/[,，円]/g, ""));
   const q = num(quantity) || 0;
-  const count = nextCount(num(baseCount) || 0, confirmedInApp);
+  const count = nextCount(num(baseCount) || 0, maxCountInApp);
   const preview = renderTemplate(template, {
     人数: q,
     契約名: name,
@@ -66,11 +66,15 @@ export function ContractForm({ companyId, companyName, contract, confirmedInApp 
             <input id="cohort" name="cohort" type="text" value={cohort} onChange={(ev) => setCohort(ev.target.value)} />
           </Field>
         </div>
-        <Field label="請求のしかた" name="kind" asGroup>
+        <Field label="請求のしかた" name="kind" asGroup hint="「都度」は、請求のない月があっても未請求として扱いません">
           <div className="choices" role="radiogroup" aria-labelledby="kind-label">
             <label className="choice">
               <input type="radio" name="kind" value="monthly" defaultChecked={(c?.kind ?? "monthly") === "monthly"} />
-              毎月
+              毎月（分割・月額）
+            </label>
+            <label className="choice">
+              <input type="radio" name="kind" value="on_demand" defaultChecked={c?.kind === "on_demand"} />
+              都度（請求するときだけ）
             </label>
             <label className="choice">
               <input type="radio" name="kind" value="one_time" defaultChecked={c?.kind === "one_time"} />

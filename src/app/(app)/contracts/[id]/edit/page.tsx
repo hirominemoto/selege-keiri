@@ -17,11 +17,18 @@ export default async function EditContractPage({ params }: { params: Promise<{ i
   const user = await requireUser();
   if (user.role !== "admin") redirect(`/companies/${company.id}`);
 
-  const { count } = await supabase
+  // アプリでの請求（取消を除く通常の依頼）の件数と、最大の回数
+  const { data: reqs } = await supabase
     .from("billing_requests")
-    .select("id", { count: "exact", head: true })
+    .select("count_no")
     .eq("contract_id", id)
-    .in("status", ["confirmed", "invoiced"]);
+    .eq("kind", "normal")
+    .eq("status", "active");
+  const count = reqs?.length ?? 0;
+  const maxCount = (reqs ?? []).reduce<number | null>(
+    (m, r) => (r.count_no !== null && (m === null || r.count_no > m) ? r.count_no : m),
+    null,
+  );
 
   return (
     <main className="page">
@@ -32,16 +39,16 @@ export default async function EditContractPage({ params }: { params: Promise<{ i
       <div className="page-head">
         <h1>契約の変更</h1>
       </div>
-      {(count ?? 0) > 0 && (
+      {count > 0 && (
         <p className="notice notice-warn" style={{ marginBottom: 16 }}>
-          この契約は、アプリで {count} 回請求を確定しています。変更は次の請求から使われ、確定済みの請求は変わりません。
+          この契約は、アプリで {count} 件の請求があります。変更はこれから作る請求から使われ、作成済みの請求は変わりません。
         </p>
       )}
       <ContractForm
         companyId={company.id}
         companyName={company.name}
         contract={contract}
-        confirmedInApp={count ?? 0}
+        maxCountInApp={maxCount}
         exampleMonth={currentMonthJst()}
       />
     </main>
