@@ -123,8 +123,9 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
                     />
                     <form action={removeRequest} className="line-remove">
                       <input type="hidden" name="request_id" value={req.id} />
+                      <input type="hidden" name="line_id" value={line.id} />
                       <input type="hidden" name="invoice_id" value={id} />
-                      <ConfirmButton message="この明細を請求書から外します。契約は「未請求」に戻ります。よろしいですか？">
+                      <ConfirmButton message="この明細を請求書から外します（明細が1行だけなら、その契約は「未請求」に戻ります）。よろしいですか？">
                         この明細を外す
                       </ConfirmButton>
                     </form>
@@ -169,6 +170,16 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           taxRate={taxRate}
           taxRounding={taxRounding}
           isDraft={isDraft}
+          frozenTotals={
+            isDraft || inv.total === null
+              ? undefined
+              : {
+                  taxable: inv.subtotal_taxable,
+                  nontaxable: inv.subtotal_nontaxable,
+                  tax: inv.tax_amount,
+                  total: inv.total,
+                }
+          }
         />
       </section>
 

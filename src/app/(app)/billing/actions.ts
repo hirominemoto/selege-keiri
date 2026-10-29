@@ -156,7 +156,7 @@ export async function saveLine(_prev: FormState, fd: FormData): Promise<FormStat
   if (errs.any) return errs.state();
 
   const q = quantity ?? 1;
-  const amount = Math.round(q * (unitPrice ?? 0));
+  const amount = roundLikeDb(q * (unitPrice ?? 0));
   if (amount === 0) return { ok: false, errors: { unit_price: "金額が0円になります。単価を確かめてください" } };
 
   const supabase = await createClient();
@@ -172,14 +172,32 @@ export async function saveLine(_prev: FormState, fd: FormData): Promise<FormStat
   return { ok: true, message: "保存しました" };
 }
 
-/** 依頼を1件外す（その契約はまた「未請求」に戻る） */
+/** PostgreSQL の round() と同じ丸め（0.5 は 0 から遠いほうへ。マイナスの値引き行でも食い違わない） */
+function roundLikeDb(x: number): number {
+  const v = Number(x.toFixed(6)); // 小数の計算の誤差（0.1×3 など）を消してから丸める
+  return Math.sign(v) * Math.round(Math.abs(v));
+}
+
+/**
+ * 明細を1行外す。依頼に明細が1行しかなければ依頼ごと外す（その契約はまた「未請求」に戻る）。
+ * 複数行の依頼で、ほかの行まで消えないようにする
+ */
 export async function removeRequest(fd: FormData): Promise<void> {
   await requireAdmin();
   const id = text(fd, "request_id");
+  const lineId = text(fd, "line_id");
   const invoiceId = text(fd, "invoice_id");
-  if (!id || !invoiceId) return;
+  if (!id || !lineId || !invoiceId) return;
   const supabase = await createClient();
-  const { error } = await supabase.from("billing_requests").delete().eq("id", id);
+  const { count, error: countError } = await supabase
+    .from("billing_request_lines")
+    .select("id", { count: "exact", head: true })
+    .eq("request_id", id);
+  if (countError) throw new Error(dbErrorMessage(countError));
+  const { error } =
+    (count ?? 0) > 1
+      ? await supabase.from("billing_request_lines").delete().eq("id", lineId).eq("request_id", id)
+      : await supabase.from("billing_requests").delete().eq("id", id);
   if (error) throw new Error(dbErrorMessage(error));
   revalidatePath(`/billing/invoices/${invoiceId}`);
   revalidatePath("/billing");

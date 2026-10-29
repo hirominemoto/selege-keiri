@@ -1,4 +1,4 @@
-import { invoiceTotals, type Issuer, type TaxRounding } from "@/lib/billing";
+import { invoiceTotals, type Issuer, type TaxRounding, type Totals } from "@/lib/billing";
 import { dateLabel } from "@/lib/format";
 
 export type SheetLine = {
@@ -20,6 +20,8 @@ type Props = {
   taxRate: number;
   taxRounding: TaxRounding;
   isDraft: boolean;
+  /** 送付OK以降は、送付OKで固まった金額をそのまま出す（いまの税の設定で計算し直さない） */
+  frozenTotals?: Totals;
 };
 
 const ROWS = 8; // 旧Excelの請求書と同じ明細8行
@@ -31,7 +33,7 @@ const n = (v: number) => v.toLocaleString("ja-JP");
  * 金額は表示用の計算。送付OKのときの正式な金額はデータベースで固まる。
  */
 export function InvoiceSheet(p: Props) {
-  const t = invoiceTotals(p.lines, p.taxRate, p.taxRounding);
+  const t = p.frozenTotals ?? invoiceTotals(p.lines, p.taxRate, p.taxRounding);
   const hasNontaxable = t.nontaxable !== 0;
   const blanks = Math.max(0, ROWS - p.lines.length);
   const ratePct = Math.round(p.taxRate * 100);

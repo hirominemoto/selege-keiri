@@ -23,6 +23,7 @@ type InvoiceRow = {
   invoice_no: string | null;
   status: string;
   send_method: string | null;
+  total: number | null;
   billing_requests: { billing_request_lines: { amount: number; taxable: boolean }[] }[];
 };
 
@@ -59,7 +60,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
       .eq("kind", "normal").eq("status", "active"),
     supabase
       .from("invoices")
-      .select("id, company_id, invoice_no, status, send_method, billing_requests!billing_requests_invoice_id_fkey(billing_request_lines(amount, taxable))")
+      .select("id, company_id, invoice_no, status, send_method, total, billing_requests!billing_requests_invoice_id_fkey(billing_request_lines(amount, taxable))")
       .eq("billing_month", billingMonth)
       .not("status", "in", "(cancelled,superseded)")
       .order("created_at"),
@@ -133,7 +134,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
 
   const invoices = ((invoiceData ?? []) as InvoiceRow[]).map((inv) => {
     const lines = inv.billing_requests.flatMap((r) => r.billing_request_lines);
-    return { ...inv, lineCount: lines.length, total: invoiceTotals(lines, taxRate, taxRounding).total };
+    // 下書きは明細から計算、送付OK以降は送付OKで固まった金額を出す
+    const total = inv.status === "draft" || inv.total === null ? invoiceTotals(lines, taxRate, taxRounding).total : inv.total;
+    return { ...inv, lineCount: lines.length, total };
   });
   invoices.sort((a, b) => (companyName.get(a.company_id) ?? "").localeCompare(companyName.get(b.company_id) ?? "", "ja"));
 
