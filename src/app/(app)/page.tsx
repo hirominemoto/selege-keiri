@@ -11,9 +11,9 @@ const menus = [
   {
     num: "2",
     title: "今月の請求",
-    desc: "請求する内容を確認して確定し、請求書を作ります",
+    desc: "契約から今月分の下書きを作り、請求書の形で確かめます（お試し版）",
     href: "/billing",
-    ready: false,
+    ready: true,
   },
   {
     num: "3",
