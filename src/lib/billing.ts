@@ -74,8 +74,9 @@ export const invoiceStatusLabel: Record<string, string> = {
 export type Issuer = {
   name?: string;
   postal_code?: string;
-  address?: string;
+  address?: string; // 改行で区切って複数行
   phone?: string;
   registration_no?: string;
-  bank?: string;
+  bank?: string; // 改行で区切って複数行
+  seal?: string; // 角印の画像（data:image/png;base64,...）
 };

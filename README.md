@@ -67,12 +67,13 @@
 ### 2-3. 請求書に印字する自社の情報を入れる
 
 **SQL Editor** で、`issuer` の値（社名・住所・電話・登録番号・振込先）を入れる。実データなので GitHub には置かない。
+住所と振込先は `\n` で改行できる。角印は `"seal": "data:image/png;base64,..."` として同じ値に入れる（作り方はゴゴに頼む）。
 
 ```sql
 update app_settings set value = '{
   "name": "社名",
   "postal_code": "000-0000",
-  "address": "住所",
+  "address": "住所1行目\\nビル名など2行目",
   "phone": "00-0000-0000",
   "registration_no": "T0000000000000",
   "bank": "銀行名 支店名 普通 0000000\n口座名義"
