@@ -13,6 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </Link>
           <nav className="app-nav" aria-label="メニュー">
             <Link href="/companies">企業・契約</Link>
+            <Link href="/billing">今月の請求</Link>
           </nav>
           <div className="app-user">
             <span>
