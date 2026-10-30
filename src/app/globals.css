@@ -830,3 +830,87 @@ tr.row-done td {
     break-after: avoid;
   }
 }
+
+/* ---------------------------------------------------------------------
+   請求の入力（設計 v1.0）
+   --------------------------------------------------------------------- */
+.bill-form {
+  display: grid;
+  gap: 16px;
+}
+.bill-form .card + .card {
+  margin-top: 0;
+}
+.bill-prev ul {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+.bill-lines {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.bill-line {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  background: #fcfbf8;
+  display: grid;
+  gap: 8px;
+}
+.bill-line-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.bill-line-tools {
+  display: flex;
+  gap: 4px;
+}
+.bill-amount {
+  padding: 8px 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.bill-totals {
+  margin: 16px 0 0 auto;
+  max-width: 320px;
+  display: grid;
+  gap: 4px;
+}
+.bill-totals div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.bill-totals dt {
+  color: var(--ink-soft);
+}
+.bill-totals dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.bill-totals .bill-total {
+  border-top: 1px solid var(--line-strong);
+  padding-top: 6px;
+  font-weight: 700;
+}
+.bill-totals .bill-total dt {
+  color: var(--ink);
+}
+.bill-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 20px;
+  margin: 0;
+}
+.bill-facts dt {
+  color: var(--ink-soft);
+}
+.bill-facts dd {
+  margin: 0;
+}
