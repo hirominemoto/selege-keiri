@@ -59,9 +59,19 @@ export function readNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** 金額（税抜）= 単価 × 個数。データベースと同じく四捨五入 */
+/**
+ * 金額（税抜）= 単価 × 個数。データベース（PostgreSQL の round）と同じく、
+ * 0.5 はゼロから遠いほうへ丸める（-50.5 → -51）。小数の計算の誤差（1.1 × 100 = 110.00000000000001）は先に取り除く
+ */
 export function lineAmount(unitPrice: number, quantity: number): number {
-  return Math.round(unitPrice * quantity);
+  const x = unitPrice * quantity;
+  const abs = Math.round(Math.abs(x) * 1e6) / 1e6;
+  return Math.sign(x) * Math.round(abs);
+}
+
+/** 小数第2位までの数か（1.1・2.3・0.29 は OK、1.234 は NG） */
+export function hasAtMost2Decimals(n: number): boolean {
+  return Math.abs(n * 100 - Math.round(n * 100)) < 1e-6;
 }
 
 /**

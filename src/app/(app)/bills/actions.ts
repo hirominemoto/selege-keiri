@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth";
-import { readNumber } from "@/lib/bills";
+import { hasAtMost2Decimals, readNumber } from "@/lib/bills";
 import { CONFLICT_MESSAGE, FieldErrors, dbErrorMessage, text, type FormState } from "@/lib/form";
 import { createClient } from "@/lib/supabase/server";
 
@@ -56,7 +56,7 @@ export async function saveBill(_prev: FormState, fd: FormData): Promise<FormStat
     if (l.unit_price === null) errs.add(`line-${i}-unit_price`, `${n}行目の単価を入れてください`);
     else if (!Number.isInteger(l.unit_price)) errs.add(`line-${i}-unit_price`, `${n}行目の単価は円単位の整数にしてください`);
     if (l.quantity === null || l.quantity === 0) errs.add(`line-${i}-quantity`, `${n}行目の個数を入れてください`);
-    else if (Math.round(l.quantity * 100) !== l.quantity * 100) {
+    else if (!hasAtMost2Decimals(l.quantity)) {
       errs.add(`line-${i}-quantity`, `${n}行目の個数は小数第2位までにしてください`);
     }
   });
