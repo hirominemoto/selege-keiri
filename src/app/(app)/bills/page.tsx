@@ -65,7 +65,7 @@ export default async function BillsPage({
         <Link href={`/bills?month=${addMonths(m, -1).slice(0, 7)}`} className="btn btn-secondary">
           ← 前の月
         </Link>
-        <form className="month-pick">
+        <form className="month-pick" key={m}>
           <input type="month" name="month" defaultValue={m.slice(0, 7)} aria-label="計上月を選ぶ" />
           <button type="submit" className="btn btn-secondary">
             表示

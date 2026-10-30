@@ -158,7 +158,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           <Link href={`/billing?month=${prev}`} className="btn btn-secondary">
             ← 前の月
           </Link>
-          <form className="month-pick">
+          <form className="month-pick" key={billingMonth}>
             <input type="month" name="month" defaultValue={billingMonth.slice(0, 7)} aria-label="請求月を選ぶ" />
             <button type="submit" className="btn btn-secondary">
               表示
