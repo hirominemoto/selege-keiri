@@ -671,4 +671,86 @@ await test("すべての業務テーブルでアクセス制御（RLS）が有�
   assert.deepEqual(r.map((x) => x.relname), []);
 });
 
+// =====================================================================
+// 「今月の請求」画面：契約から下書きをまとめて作る（0002_billing_drafts.sql）
+// =====================================================================
+
+let bCo1, bCo2, bC1, bC2, bC3;
+const bItem = (contract, extra = {}) => ({
+  contract_id: contract, description: "2名分：在留サポートサービス：12月分（3回目/全24回）", count_no: 3, ...extra,
+});
+const createDrafts = async (month, items) =>
+  (await one(`select public.billing_create_drafts($1, $2::jsonb) as r`, [month, JSON.stringify(items)])).r;
+
+await test("今月の請求：選んだ契約から依頼・明細・下書きをまとめて作る（企業ごとに1枚、翌月分の契約は◯月分が翌月）", async () => {
+  bCo1 = (await one(`insert into public.companies (name) values ('請求画面テスト一') returning id`)).id;
+  bCo2 = (await one(`insert into public.companies (name) values ('請求画面テスト二') returning id`)).id;
+  bC1 = (await one(`insert into public.contracts (company_id, name, quantity, unit_price, service_month_offset)
+                    values ($1, '在留サポートサービス', 2, 36000, 1) returning id`, [bCo1])).id;
+  bC2 = (await one(`insert into public.contracts (company_id, name, cohort, quantity, unit_price)
+                    values ($1, '在留サポートサービス', '二期生', 1, 15000) returning id`, [bCo1])).id;
+  bC3 = (await one(`insert into public.contracts (company_id, name, quantity, unit_price)
+                    values ($1, '受入サポート', 1, 50000) returning id`, [bCo2])).id;
+  const r = await createDrafts("2026-11-01", [bItem(bC1), bItem(bC2, { count_no: null }), bItem(bC3)]);
+  assert.equal(r.created, 3);
+  assert.equal(r.skipped, 0);
+  assert.equal(r.invoices.length, 2);
+  const reqs = await all(`select r.contract_id, r.service_month::text as svc, r.invoice_id, r.count_no, l.amount, l.contract_amount
+                            from public.billing_requests r join public.billing_request_lines l on l.request_id = r.id
+                           where r.contract_id = any($1)`, [[bC1, bC2, bC3]]);
+  const c1 = reqs.find((x) => x.contract_id === bC1);
+  assert.equal(c1.svc, "2026-12-01");
+  assert.equal(c1.amount, 72000);
+  assert.equal(c1.contract_amount, 72000);
+  assert.equal(c1.count_no, 3);
+  assert.equal(reqs.find((x) => x.contract_id === bC2).svc, "2026-11-01");
+  assert.equal(reqs.find((x) => x.contract_id === bC2).count_no, null);
+  // 同じ企業の2件は同じ下書きに載る
+  assert.equal(c1.invoice_id, reqs.find((x) => x.contract_id === bC2).invoice_id);
+  const inv = await invoice(c1.invoice_id);
+  assert.equal(inv.status, "draft");
+  assert.equal(inv.send_method, null);
+  assert.equal(inv.invoice_no, null);
+});
+
+await test("今月の請求：2回押しても依頼は増えない。請求状況は「下書き」になる", async () => {
+  const r = await createDrafts("2026-11-01", [bItem(bC1), bItem(bC3)]);
+  assert.equal(r.created, 0);
+  assert.equal(r.skipped, 2);
+  const n = await one(`select count(*)::int as n from public.billing_requests where contract_id = any($1)`, [[bC1, bC2, bC3]]);
+  assert.equal(n.n, 3);
+  const s = await one(`select state from public.contract_billing_status('2026-12-01', '2026-12-01') where contract_id = $1`, [bC1]);
+  assert.equal(s.state, "draft");
+});
+
+await test("今月の請求：あとから同じ企業の契約を足すと、いまある下書きに載る", async () => {
+  const bC4 = (await one(`insert into public.contracts (company_id, name, quantity, unit_price)
+                          values ($1, '追加の契約', 1, 1000) returning id`, [bCo1])).id;
+  const r = await createDrafts("2026-11-01", [bItem(bC4)]);
+  assert.equal(r.created, 1);
+  const n = await one(`select count(distinct invoice_id)::int as n from public.billing_requests where company_id = $1`, [bCo1]);
+  assert.equal(n.n, 1);
+});
+
+await test("今月の請求：見るだけの人は下書きを作れない", async () => {
+  await as(U2);
+  await rejects(`select public.billing_create_drafts('2026-11-01', '[]'::jsonb)`, [], /管理者だけ/);
+  await as(U1);
+});
+
+await test("下書きの片付け：依頼・明細ごと消え、契約は「未請求」に戻る。番号の付いた請求書は片付けられない", async () => {
+  const invId = (await one(`select invoice_id from public.billing_requests where contract_id = $1`, [bC3])).invoice_id;
+  await db.query(`select public.invoice_discard_draft($1)`, [invId]);
+  assert.equal(await invoice(invId), undefined);
+  const n = await one(`select count(*)::int as n from public.billing_requests where contract_id = $1`, [bC3]);
+  assert.equal(n.n, 0);
+  const s = await one(`select state from public.contract_billing_status('2026-11-01', '2026-11-01') where contract_id = $1`, [bC3]);
+  assert.equal(s.state, "unbilled");
+  // 送付OKにした請求書は片付けられない
+  const r = await createDrafts("2026-11-01", [bItem(bC3)]);
+  await choose(r.invoices[0], "post");
+  await sendOk(r.invoices[0]);
+  await rejects(`select public.invoice_discard_draft($1)`, [r.invoices[0]], /番号の付いていない下書きだけ/);
+});
+
 console.log(`\n${passed} 件成功${process.exitCode ? "（失敗あり）" : ""}`);

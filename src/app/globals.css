@@ -439,3 +439,394 @@ textarea {
   font-size: 15px;
   margin-bottom: 0;
 }
+
+/* ---------------------------------------------------------------------
+   今月の請求
+   --------------------------------------------------------------------- */
+.month-nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.month-pick {
+  display: flex;
+  gap: 6px;
+}
+.month-pick input {
+  width: 150px;
+}
+.summary-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.summary-chips span {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+.summary-chips strong {
+  color: var(--ink);
+  margin-left: 4px;
+}
+tr.row-done td {
+  color: var(--ink-soft);
+  background: #fbfaf7;
+}
+.state-unbilled {
+  background: var(--warn-soft);
+  border-color: transparent;
+  color: var(--warn);
+}
+.state-draft,
+.state-correcting {
+  background: #e8eefb;
+  border-color: transparent;
+  color: #2d4f9e;
+}
+.state-invoiced {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+}
+.sticky-actions {
+  position: sticky;
+  bottom: 0;
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
+}
+.btn-danger-quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--danger);
+  font-weight: 400;
+  padding: 4px 8px;
+}
+
+/* 請求書の下書き */
+.invoice-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  margin-bottom: 32px;
+}
+@media (max-width: 860px) {
+  .invoice-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+.line-list {
+  display: grid;
+  gap: 12px;
+}
+.line-list .card + .card {
+  margin-top: 0;
+}
+.line-editor {
+  display: grid;
+  gap: 10px;
+}
+.line-editor-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.line-editor.is-different input[name="unit_price"],
+.line-editor.is-different input[name="quantity"] {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+.line-remove {
+  margin-top: 6px;
+  text-align: right;
+}
+.next-step {
+  margin-top: 16px;
+  opacity: 0.7;
+}
+
+/* 請求書1枚（A4 = 210mm × 297mm）。旧Excelの請求書と同じ並び */
+.invoice-preview {
+  overflow-x: auto;
+}
+.invoice-sheet {
+  position: relative;
+  width: 210mm;
+  min-height: 297mm;
+  margin: 0 auto;
+  padding: 24mm 33mm 10mm 20mm; /* 見本の請求書の余白（右が広い） */
+  background: #fff;
+  color: #000;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  font-family: "Meiryo", "メイリオ", sans-serif;
+  font-size: 9.5pt;
+  line-height: 1.45;
+  overflow: hidden;
+}
+.invoice-watermark {
+  position: absolute;
+  top: 45%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-24deg);
+  font-size: 96pt;
+  font-weight: 700;
+  color: rgba(179, 38, 30, 0.07);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.invoice-pending {
+  color: #b3261e;
+  font-size: 8.5pt;
+}
+.inv-underline {
+  border-bottom: 1px solid #000;
+}
+.inv-date {
+  width: 62mm;
+  margin: 0 0 0 auto;
+  font-size: 9.5pt;
+}
+.inv-date > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 1mm;
+}
+.inv-date-label {
+  padding-left: 10mm;
+}
+.inv-regno {
+  justify-content: flex-end !important;
+}
+.inv-to {
+  width: 97mm;
+  margin-top: 0;
+  display: flex;
+  align-items: baseline;
+  padding: 0 0 0.5mm 20.5mm;
+}
+.inv-to-name {
+  font-weight: 700;
+  font-size: 11pt;
+  flex: 1;
+}
+.inv-to-honorific {
+  font-size: 11pt;
+  padding-right: 10mm;
+}
+.inv-from {
+  position: relative;
+  margin: 1.5mm 0 0 97mm;
+  min-height: 24mm;
+  font-size: 9.5pt;
+  line-height: 1.3;
+}
+.inv-seal {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 23mm;
+  height: 23mm;
+  object-fit: contain;
+}
+.inv-seal-empty {
+  border: 1.5px dashed rgba(179, 38, 30, 0.6);
+  color: rgba(179, 38, 30, 0.7);
+  display: grid;
+  place-items: center;
+  font-size: 8.5pt;
+}
+.inv-from > .invoice-pending {
+  padding-right: 28mm;
+}
+.inv-title {
+  font-size: 18pt;
+  font-weight: 700;
+  margin: -2mm 0 0 7.5mm;
+  letter-spacing: 0.05em;
+}
+.inv-greeting {
+  margin: 6mm 0 0;
+}
+.inv-amount-label {
+  margin-top: 9mm;
+}
+.inv-amount {
+  width: 107mm;
+  margin-left: 3.4mm;
+  border: 3px double #000;
+  padding: 3.5mm 5mm 2mm;
+}
+.inv-amount-inner {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid #000;
+  font-size: 16pt;
+  padding: 0 6mm;
+}
+.inv-amount-num {
+  flex: 1;
+  text-align: center;
+}
+.inv-lines {
+  width: 100%;
+  table-layout: fixed; /* 列の幅を見本どおりに固定する */
+  border-collapse: collapse;
+  margin-top: 9.5mm;
+}
+.inv-lines th,
+.inv-lines td {
+  border: 1px solid #000;
+  padding: 0.5mm 1.5mm;
+  font-size: 9.5pt;
+  background: none;
+  color: #000;
+  vertical-align: middle;
+  font-weight: 400;
+}
+.inv-lines th {
+  text-align: center;
+  padding: 0.3mm 0;
+  white-space: nowrap;
+  letter-spacing: -0.03em;
+}
+.inv-lines tbody td {
+  height: 9.3mm;
+}
+.inv-lines .c-date {
+  width: 20.5mm;
+  text-align: center;
+}
+.inv-lines td.c-desc {
+  font-size: 7.5pt;
+  line-height: 1.35;
+}
+.inv-lines .c-qty {
+  width: 19.5mm;
+  text-align: center;
+}
+.inv-lines .c-amount {
+  width: 29mm;
+  text-align: center;
+}
+.inv-lines .c-due {
+  width: 33mm;
+  text-align: center;
+}
+/* アプリ全体の「最後の行は下線なし」を、請求書の表では打ち消す */
+.inv-lines tr:last-child td,
+.inv-totals tr:last-child th,
+.inv-totals tr:last-child td {
+  border-bottom: 1px solid #000;
+}
+.inv-totals-wrap {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-right: 33mm; /* 支払予定日の列のぶん */
+}
+.inv-taxnote {
+  font-size: 7pt;
+  margin-right: 1.5mm;
+}
+.inv-totals {
+  border-collapse: collapse;
+  width: 48.5mm;
+}
+.inv-totals th,
+.inv-totals td {
+  border: 1px solid #000;
+  border-top: none;
+  padding: 0.1mm 1.5mm;
+  font-size: 9.5pt;
+  font-weight: 400;
+  background: none;
+  color: #000;
+  white-space: nowrap;
+}
+.inv-totals th {
+  width: 19.5mm;
+  text-align: center;
+}
+.inv-totals td {
+  text-align: right;
+}
+.inv-bank-note {
+  margin: 14mm 0 0;
+  font-size: 9.5pt;
+}
+.inv-indent {
+  padding-left: 1em;
+}
+.inv-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-top: 12mm;
+}
+.inv-bank {
+  padding-left: 21mm;
+  font-size: 9.5pt;
+  line-height: 1.3;
+}
+.inv-no {
+  display: flex;
+  align-items: flex-end;
+  gap: 3mm;
+  margin-right: 0;
+}
+.inv-no-box {
+  display: inline-block;
+  min-width: 33mm;
+  border: 1px solid #000;
+  text-align: center;
+  padding: 0 2mm;
+}
+
+/* 印刷（PDFで保存）：請求書だけを A4 1枚に */
+@page {
+  size: A4;
+  margin: 0;
+}
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+  .app-header,
+  .no-print {
+    display: none !important;
+  }
+  .page {
+    max-width: none;
+    padding: 0;
+    margin: 0;
+  }
+  .invoice-preview {
+    overflow: visible;
+  }
+  .invoice-sheet {
+    box-shadow: none;
+    margin: 0;
+    min-height: 0;
+    height: 296mm;
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+}
