@@ -7,15 +7,19 @@ import { ActionForm } from "@/components/ActionForm";
 import { Field } from "@/components/Field";
 import { invoiceTotals, type TaxRounding } from "@/lib/billing";
 import {
+  contractLabel,
   defaultDueDate,
+  isDueThisMonth,
   lineAmount,
-  nextCountFrom,
+  lineFromContract,
   readNumber,
   type Bill,
   type BillLine,
+  type ContractState,
   type LineDraft,
 } from "@/lib/bills";
-import { dateLabel, yen } from "@/lib/format";
+import { CompanyBillingPanel, type PreviousBill } from "@/components/CompanyBillingPanel";
+import { monthLabel, yen } from "@/lib/format";
 
 export type CompanyOption = {
   id: string;
@@ -25,15 +29,31 @@ export type CompanyOption = {
   payment_due_day: number | null;
 };
 
-/** 企業ごとの前回の請求（回数の目安を出すため） */
-export type PreviousBill = { issue_date: string; descriptions: string[] };
-
 // 行の key はサーバーとブラウザで同じになるよう、最初の行は決まった名前、足した行は連番にする
-const emptyLine = (key: string): LineDraft => ({ key, description: "", unit_price: "", quantity: "1", taxable: true, note: "" });
+const emptyLine = (key: string): LineDraft => ({
+  key,
+  description: "",
+  unit_price: "",
+  quantity: "1",
+  taxable: true,
+  note: "",
+  contract_id: null,
+  count_no: "",
+  service_month: "",
+});
+const isBlank = (l: LineDraft) => !l.description.trim() && !l.unit_price.trim() && !l.note.trim() && !l.contract_id;
+
+/** 当月に請求する契約の行（なければ空の1行） */
+function contractLines(contracts: ContractState[], accountingMonth: string): LineDraft[] {
+  const due = contracts.filter((c) => isDueThisMonth(c, accountingMonth));
+  return due.length ? due.map((c) => lineFromContract(c, accountingMonth, `c-${c.id}`)) : [emptyLine("first")];
+}
 
 export function BillForm(props: {
   companies: CompanyOption[];
+  contractsByCompany: Record<string, ContractState[]>;
   previous: Record<string, PreviousBill>;
+  initialCompanyId?: string; // 企業のページから来たとき
   taxRate: number;
   taxRounding: TaxRounding;
   defaultStaff: string;
@@ -45,13 +65,18 @@ export function BillForm(props: {
   const [state, action, pending] = useActionState(saveBill, {});
   const e = state.errors ?? {};
 
-  const [companyId, setCompanyId] = useState(b?.company_id ?? "");
+  const initialCompany = b?.company_id ?? props.companies.find((c) => c.id === props.initialCompanyId)?.id ?? "";
+  const [companyId, setCompanyId] = useState(initialCompany);
+  const startCompany = props.companies.find((c) => c.id === initialCompany);
   const [issueDate, setIssueDate] = useState(b?.issue_date ?? props.today);
   const [month, setMonth] = useState((b?.accounting_month ?? props.today).slice(0, 7));
   const [monthTouched, setMonthTouched] = useState(!!b);
-  const [due, setDue] = useState(b?.payment_due_date ?? "");
+  const [due, setDue] = useState(
+    b?.payment_due_date ??
+      (startCompany ? defaultDueDate(props.today, startCompany.payment_due_months, startCompany.payment_due_day) : ""),
+  );
   const [dueTouched, setDueTouched] = useState(!!b);
-  const [sendMethod, setSendMethod] = useState<"post" | "email">(b?.send_method ?? "post");
+  const [sendMethod, setSendMethod] = useState<"post" | "email">(b?.send_method ?? startCompany?.send_method ?? "post");
   const [sendTouched, setSendTouched] = useState(!!b);
   const [lines, setLines] = useState<LineDraft[]>(
     props.lines && props.lines.length > 0
@@ -62,22 +87,46 @@ export function BillForm(props: {
           quantity: String(Number(l.quantity)),
           taxable: l.taxable,
           note: l.note ?? "",
+          contract_id: l.contract_id,
+          count_no: l.count_no === null ? "" : String(l.count_no),
+          service_month: l.service_month ?? "",
         }))
-      : [emptyLine("first")],
+      : initialCompany
+        ? contractLines(props.contractsByCompany[initialCompany] ?? [], `${props.today.slice(0, 7)}-01`)
+        : [emptyLine("first")],
   );
   const added = useRef(0);
   const newLine = () => emptyLine(`added-${++added.current}`);
 
   const company = props.companies.find((c) => c.id === companyId);
-  const prev = companyId ? props.previous[companyId] : undefined;
-  const hints = (prev?.descriptions ?? [])
-    .map((d) => ({ d, next: nextCountFrom(d) }))
-    .filter((h): h is { d: string; next: string } => h.next !== null);
+  const contracts = companyId ? (props.contractsByCompany[companyId] ?? []) : [];
+  const monthStart = `${month || props.today.slice(0, 7)}-01`;
+  const contractById = new Map(contracts.map((c) => [c.id, c]));
+  // 行に入っていない契約（都度・1回だけの契約も、ここから足せる）
+  const addable = contracts.filter((c) => c.status === "active" && !lines.some((l) => l.contract_id === c.id));
+
+  // 計上月が変わったら、契約の行のうち手で直していないもの（内訳・回数がそのまま）の「◯月分」を作り直す
+  const changeMonth = (nextMonth: string) => {
+    const from = `${month || props.today.slice(0, 7)}-01`;
+    const to = `${nextMonth}-01`;
+    setMonth(nextMonth);
+    if (!/^\d{4}-\d{2}$/.test(nextMonth) || from === to) return;
+    setLines((ls) =>
+      ls.map((l) => {
+        const c = l.contract_id ? (props.contractsByCompany[companyId] ?? []).find((x) => x.id === l.contract_id) : undefined;
+        if (!c) return l;
+        const was = lineFromContract(c, from, l.key);
+        if (l.description !== was.description || l.count_no !== was.count_no) return l;
+        const now = lineFromContract(c, to, l.key);
+        return { ...l, description: now.description, count_no: now.count_no, service_month: now.service_month };
+      }),
+    );
+  };
 
   // 企業・請求日が変わったら、手で直していない項目の初期値を入れ直す
   const recompute = (nextCompanyId: string, nextIssueDate: string) => {
     const c = props.companies.find((x) => x.id === nextCompanyId);
-    if (!monthTouched && nextIssueDate) setMonth(nextIssueDate.slice(0, 7));
+    if (!monthTouched && nextIssueDate) changeMonth(nextIssueDate.slice(0, 7));
     if (c && !dueTouched && nextIssueDate) setDue(defaultDueDate(nextIssueDate, c.payment_due_months, c.payment_due_day));
     if (c && !sendTouched) setSendMethod(c.send_method);
   };
@@ -124,7 +173,18 @@ export function BillForm(props: {
       <input
         type="hidden"
         name="lines"
-        value={JSON.stringify(lines.map(({ description, unit_price, quantity, taxable, note }) => ({ description, unit_price, quantity, taxable, note })))}
+        value={JSON.stringify(
+          lines.map(({ description, unit_price, quantity, taxable, note, contract_id, count_no, service_month }) => ({
+            description,
+            unit_price,
+            quantity,
+            taxable,
+            note,
+            contract_id,
+            count_no,
+            service_month,
+          })),
+        )}
       />
 
       <div className="card form-section">
@@ -135,8 +195,15 @@ export function BillForm(props: {
             name="company_id"
             value={companyId}
             onChange={(ev) => {
-              setCompanyId(ev.target.value);
-              recompute(ev.target.value, issueDate);
+              const next = ev.target.value;
+              setCompanyId(next);
+              recompute(next, issueDate);
+              // まだ何も入れていなければ、その企業の当月の契約の行を並べる。契約の行は企業が変われば外す
+              setLines((ls) => {
+                const kept = ls.filter((l) => !l.contract_id && !isBlank(l));
+                if (kept.length > 0) return kept;
+                return next ? contractLines(props.contractsByCompany[next] ?? [], monthStart) : [emptyLine("first")];
+              });
             }}
           >
             <option value="">選んでください</option>
@@ -148,27 +215,17 @@ export function BillForm(props: {
           </select>
         </Field>
 
-        {prev && (
-          <div className="notice notice-info bill-prev">
-            <div>
-              前回の請求：{dateLabel(prev.issue_date)}
-            </div>
-            {hints.length > 0 ? (
-              <ul>
-                {hints.map((h) => (
-                  <li key={h.d}>
-                    {h.d} → <strong>今回は {h.next}</strong>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <ul>
-                {prev.descriptions.map((d) => (
-                  <li key={d}>{d}</li>
-                ))}
-              </ul>
-            )}
-          </div>
+        {company && (
+          <details className="billing-panel-wrap" open>
+            <summary>この企業の請求状況（回数・前回の請求）</summary>
+            <CompanyBillingPanel
+              contracts={contracts}
+              previous={props.previous[company.id]}
+              accountingMonth={monthStart}
+              taxRate={props.taxRate}
+              taxRounding={props.taxRounding}
+            />
+          </details>
         )}
 
         <div className="form-row">
@@ -191,7 +248,7 @@ export function BillForm(props: {
               type="month"
               value={month}
               onChange={(ev) => {
-                setMonth(ev.target.value);
+                changeMonth(ev.target.value);
                 setMonthTouched(true);
               }}
             />
@@ -275,7 +332,14 @@ export function BillForm(props: {
           {lines.map((l, i) => (
             <li key={l.key} className="bill-line">
               <div className="bill-line-head">
-                <strong>{i + 1}行目</strong>
+                <span>
+                  <strong>{i + 1}行目</strong>
+                  {l.contract_id && contractById.get(l.contract_id) && (
+                    <span className="badge badge-active" style={{ marginLeft: 8 }}>
+                      契約：{contractLabel(contractById.get(l.contract_id)!)}・{monthLabel(l.service_month)}分
+                    </span>
+                  )}
+                </span>
                 <span className="bill-line-tools">
                   <button type="button" className="btn btn-quiet" onClick={() => move(i, -1)} disabled={i === 0} aria-label={`${i + 1}行目を上へ`}>
                     ↑
@@ -310,6 +374,17 @@ export function BillForm(props: {
                 </div>
               </div>
               <div className="form-row">
+                {l.contract_id && (
+                  <Field label="回数" name={`c-${l.key}`} error={e[`line-${i}-count_no`]} hint="何回目か。内訳の文字とそろえてください">
+                    <input
+                      id={`c-${l.key}`}
+                      type="text"
+                      inputMode="numeric"
+                      value={l.count_no}
+                      onChange={(ev) => update(l.key, { count_no: ev.target.value })}
+                    />
+                  </Field>
+                )}
                 <Field label="備考" name={`n-${l.key}`} hint="企業別シートのG列「備考」に入ります">
                   <input id={`n-${l.key}`} type="text" value={l.note} onChange={(ev) => update(l.key, { note: ev.target.value })} />
                 </Field>
@@ -324,9 +399,23 @@ export function BillForm(props: {
             </li>
           ))}
         </ol>
-        <button type="button" className="btn btn-secondary" onClick={() => setLines((ls) => [...ls, newLine()])}>
-          ＋ 行を足す
-        </button>
+        <div className="bill-add">
+          <button type="button" className="btn btn-secondary" onClick={() => setLines((ls) => [...ls, newLine()])}>
+            ＋ 行を足す
+          </button>
+          {addable.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className="btn btn-quiet"
+              onClick={() =>
+                setLines((ls) => [...ls.filter((l) => !isBlank(l)), lineFromContract(c, monthStart, `c-${c.id}-${++added.current}`)])
+              }
+            >
+              ＋ 契約から：{contractLabel(c)}
+            </button>
+          ))}
+        </div>
 
         <dl className="bill-totals">
           <div>

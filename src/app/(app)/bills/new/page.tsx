@@ -5,7 +5,8 @@ import { requireUser } from "@/lib/auth";
 import { todayJst } from "@/lib/bills";
 import { loadBillFormData } from "../formData";
 
-export default async function NewBillPage() {
+export default async function NewBillPage({ searchParams }: { searchParams: Promise<{ company?: string }> }) {
+  const { company } = await searchParams;
   const user = await requireUser();
   if (user.role !== "admin") redirect("/bills");
   const data = await loadBillFormData();
@@ -21,7 +22,7 @@ export default async function NewBillPage() {
           <p className="lead">1回の入力が、1枚の請求書になります。保存したあとも、請求書を作るまでは何度でも直せます。</p>
         </div>
       </div>
-      <BillForm {...data} defaultStaff={user.displayName ?? ""} today={todayJst()} />
+      <BillForm {...data} initialCompanyId={company} defaultStaff={user.displayName ?? ""} today={todayJst()} />
     </main>
   );
 }

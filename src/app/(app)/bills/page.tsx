@@ -20,21 +20,24 @@ type Row = {
 export default async function BillsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; deleted?: string }>;
+  searchParams: Promise<{ month?: string; deleted?: string; company?: string }>;
 }) {
-  const { month, deleted } = await searchParams;
+  const { month, deleted, company } = await searchParams;
   const user = await requireUser();
   const m = parseMonth(month) ?? currentMonthJst();
   const supabase = await createClient();
 
-  const [{ data, error }, { data: settingData }] = await Promise.all([
-    supabase
-      .from("bills")
-      .select("id, issue_date, status, invoice_no, send_method, staff_name, companies(name), bill_lines(description, amount, taxable, sort)")
-      .eq("accounting_month", m)
-      .order("issue_date")
-      .order("created_at"),
+  // 企業のページから来たときは、その企業の請求を全部の月で出す
+  let query = supabase
+    .from("bills")
+    .select("id, issue_date, status, invoice_no, send_method, staff_name, companies(name), bill_lines(description, amount, taxable, sort)");
+  query = company
+    ? query.eq("company_id", company).order("issue_date", { ascending: false })
+    : query.eq("accounting_month", m).order("issue_date");
+  const [{ data, error }, { data: settingData }, { data: companyRow }] = await Promise.all([
+    query.order("created_at"),
     supabase.from("app_settings").select("key, value").in("key", ["tax_rate", "tax_rounding"]),
+    company ? supabase.from("companies").select("id, name").eq("id", company).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const settings = new Map((settingData ?? []).map((s) => [s.key as string, s.value]));
   const taxRate = Number(settings.get("tax_rate") ?? 0.1);
@@ -51,16 +54,25 @@ export default async function BillsPage({
     <main className="page">
       <div className="page-head">
         <div>
-          <h1>請求の入力</h1>
-          <p className="lead">計上月ごとの請求。1回の入力が1枚の請求書になります。</p>
+          <h1>{companyRow ? `${companyRow.name}の請求` : "請求の入力"}</h1>
+          <p className="lead">
+            {companyRow ? (
+              <>
+                すべての月の請求。<Link href={`/companies/${companyRow.id}`}>企業のページへ戻る</Link>
+              </>
+            ) : (
+              "計上月ごとの請求。1回の入力が1枚の請求書になります。"
+            )}
+          </p>
         </div>
         {user.role === "admin" && (
-          <Link href="/bills/new" className="btn">
+          <Link href={companyRow ? `/bills/new?company=${companyRow.id}` : "/bills/new"} className="btn">
             ＋ 新しい請求を入力
           </Link>
         )}
       </div>
 
+      {!companyRow && (
       <div className="month-nav">
         <Link href={`/bills?month=${addMonths(m, -1).slice(0, 7)}`} className="btn btn-secondary">
           ← 前の月
@@ -75,13 +87,14 @@ export default async function BillsPage({
           次の月 →
         </Link>
       </div>
+      )}
 
       {deleted && <p className="notice notice-info">請求を消しました。</p>}
       {error && <p className="notice notice-error">読み込めませんでした（{error.message}）</p>}
 
       <div className="summary-chips">
         <span>
-          {monthLabel(m)}の請求<strong>{rows.length}件</strong>
+          {companyRow ? "請求" : `${monthLabel(m)}の請求`}<strong>{rows.length}件</strong>
         </span>
         <span>
           入力中<strong>{drafts}件</strong>
@@ -92,7 +105,7 @@ export default async function BillsPage({
       </div>
 
       {rows.length === 0 ? (
-        <p className="empty">この月の請求はまだありません。</p>
+        <p className="empty">{companyRow ? "この企業の請求はまだありません。" : "この月の請求はまだありません。"}</p>
       ) : (
         <div className="table-wrap card">
           <table>

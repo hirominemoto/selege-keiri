@@ -1,6 +1,7 @@
 /** 請求の入力（設計 v1.0）まわりの型と計算。画面の表示用 */
 
 import { addMonths, monthEnd } from "@/lib/billing";
+import { monthName, renderTemplate } from "@/lib/contract";
 
 export type BillStatus = "draft" | "issued";
 
@@ -31,6 +32,9 @@ export type BillLine = {
   amount: number;
   taxable: boolean;
   note: string | null;
+  contract_id: string | null;
+  count_no: number | null;
+  service_month: string | null;
 };
 
 export const billStatusLabel: Record<BillStatus, string> = {
@@ -46,7 +50,76 @@ export type LineDraft = {
   quantity: string;
   taxable: boolean;
   note: string;
+  // 契約から作った行だけ
+  contract_id: string | null;
+  count_no: string;
+  service_month: string; // "2026-11-01"
 };
+
+/** 契約と、その請求の進み具合（contract_next_counts） */
+export type ContractState = {
+  id: string;
+  company_id: string;
+  name: string;
+  cohort: string | null;
+  kind: "monthly" | "on_demand" | "one_time";
+  status: "active" | "paused" | "ended";
+  quantity: number;
+  unit_price: number;
+  taxable: boolean;
+  service_month_offset: number;
+  total_count: number | null;
+  count_unit: "回" | "か月";
+  description_template: string | null;
+  start_month: string | null;
+  end_month: string | null;
+  last_count: number | null;
+  next_count: number;
+  last_service_month: string | null;
+};
+
+export const contractLabel = (c: { name: string; cohort: string | null }) =>
+  `${c.name}${c.cohort ? `（${c.cohort}）` : ""}`;
+
+/** 計上月にこの契約を請求すると「◯月分」はいつか */
+export const serviceMonthOf = (c: ContractState, accountingMonth: string) =>
+  addMonths(accountingMonth, c.service_month_offset);
+
+/**
+ * 当月の請求で、最初から行に並べる契約か：継続中・毎月の契約で、その「◯月分」がまだ請求されておらず、
+ * 契約期間の中にあり、全回数を超えないもの
+ */
+export function isDueThisMonth(c: ContractState, accountingMonth: string): boolean {
+  if (c.status !== "active" || c.kind !== "monthly") return false;
+  const svc = serviceMonthOf(c, accountingMonth);
+  if (c.last_service_month && svc <= c.last_service_month) return false;
+  if (c.start_month && svc < c.start_month) return false;
+  if (c.end_month && svc > c.end_month) return false;
+  if (c.total_count !== null && c.next_count > c.total_count) return false;
+  return true;
+}
+
+/** 契約から明細1行を作る（内訳は契約の品名のひな形から） */
+export function lineFromContract(c: ContractState, accountingMonth: string, key: string): LineDraft {
+  return {
+    key,
+    description: renderTemplate(c.description_template, {
+      人数: Number(c.quantity),
+      契約名: c.name,
+      期: c.cohort ?? "",
+      対象月: monthName(accountingMonth, c.service_month_offset),
+      回数: c.next_count,
+      全回数: c.total_count ?? "",
+    }),
+    unit_price: String(c.unit_price),
+    quantity: String(Number(c.quantity)),
+    taxable: c.taxable,
+    note: "",
+    contract_id: c.id,
+    count_no: String(c.next_count),
+    service_month: serviceMonthOf(c, accountingMonth),
+  };
+}
 
 /** 全角数字・カンマ・円を許して数にする。読めなければ null */
 export function readNumber(raw: string): number | null {
@@ -89,21 +162,4 @@ export function defaultDueDate(issueDate: string, months: number, day: number | 
 /** 日本時間の今日 "2026-10-30" */
 export function todayJst(now: Date = new Date()): string {
   return new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-}
-
-/**
- * 内訳から「5回目/全24回」「（5回目/24回）」「26か月目」を読み取り、次の回数を出す。
- * 書き方は入力者に任せているので、読めないときは null（何も出さない）。
- */
-export function nextCountFrom(description: string): string | null {
-  const t = description.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
-  const m = /(\d+)\s*回目\s*[/／]\s*全?\s*(\d+)\s*回/.exec(t);
-  if (m) {
-    const n = Number(m[1]) + 1;
-    const total = Number(m[2]);
-    return n > total ? `全${total}回が終わっています（前回 ${m[1]}回目）` : `${n}回目/全${total}回`;
-  }
-  const k = /(\d+)\s*か月目/.exec(t);
-  if (k) return `${Number(k[1]) + 1}か月目`;
-  return null;
 }

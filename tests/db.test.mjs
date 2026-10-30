@@ -848,4 +848,30 @@ await test("請求の入力：入力中の請求は明細ごと消せる", async
   assert.equal((await billLines(billId)).length, 0);
 });
 
+await test("契約の行：回数と◯月分が残り、次の回数は「導入前の回数とアプリの最大」の大きいほう + 1", async () => {
+  // contractId：導入前に3回請求済み（base_count = 3）、全12回、旧Excelで10月分まで
+  const before = await one(`select * from public.contract_next_counts($1) where contract_id = $2`, [companyId, contractId]);
+  assert.equal(before.next_count, 4);
+  const id = (await saveBill(null, null, billHead(), [
+    { description: "2名分：在留サポートサービス：11月分（4回目/全12回）", unit_price: 38000, quantity: 2,
+      contract_id: contractId, count_no: 4, service_month: "2026-11-01" },
+    { description: "通訳の交通費", unit_price: 1240, quantity: 1, taxable: false, count_no: 9 },
+  ])).id;
+  const ls = await billLines(id);
+  assert.equal(ls[0].contract_id, contractId);
+  assert.equal(ls[0].count_no, 4);
+  assert.equal(ls[1].contract_id, null);
+  assert.equal(ls[1].count_no, null);   // 契約のない行に回数は残さない
+  const after = await one(`select next_count, last_count, last_service_month::text as m from public.contract_next_counts($1) where contract_id = $2`, [companyId, contractId]);
+  assert.deepEqual([after.next_count, after.last_count, after.m], [5, 4, "2026-11-01"]);
+  await db.query(`select public.bill_delete_draft($1)`, [id]);
+});
+
+await test("契約の行：ほかの企業の契約にはつなげられない", async () => {
+  const otherContract = (await one(`insert into public.contracts (company_id, name, quantity, unit_price) values ($1, '別会社の契約', 1, 1000) returning id`, [emailCompanyId])).id;
+  await rejects(`select public.bill_save(null, null, $1::jsonb, $2::jsonb)`,
+    [JSON.stringify(billHead()), JSON.stringify([{ description: "x", unit_price: 1, quantity: 1, contract_id: otherContract }])],
+    /選んだ企業の契約ではありません/);
+});
+
 console.log(`\n${passed} 件成功${process.exitCode ? "（失敗あり）" : ""}`);

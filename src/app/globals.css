@@ -914,3 +914,30 @@ tr.row-done td {
 .bill-facts dd {
   margin: 0;
 }
+.billing-panel h3 {
+  font-size: 15px;
+  margin: 12px 0 6px;
+}
+.billing-panel h3:first-child {
+  margin-top: 0;
+}
+.billing-panel-wrap {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fcfbf8;
+  padding: 10px 14px;
+  margin: 4px 0 12px;
+}
+.billing-panel-wrap summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+}
+.billing-panel-wrap[open] summary {
+  margin-bottom: 8px;
+}
+.bill-add {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

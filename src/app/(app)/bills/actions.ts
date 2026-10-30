@@ -7,7 +7,16 @@ import { hasAtMost2Decimals, readNumber } from "@/lib/bills";
 import { CONFLICT_MESSAGE, FieldErrors, dbErrorMessage, text, type FormState } from "@/lib/form";
 import { createClient } from "@/lib/supabase/server";
 
-type LineIn = { description?: unknown; unit_price?: unknown; quantity?: unknown; taxable?: unknown; note?: unknown };
+type LineIn = {
+  description?: unknown;
+  unit_price?: unknown;
+  quantity?: unknown;
+  taxable?: unknown;
+  note?: unknown;
+  contract_id?: unknown;
+  count_no?: unknown;
+  service_month?: unknown;
+};
 
 const isDate = (v: string | null): v is string => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
@@ -45,9 +54,12 @@ export async function saveBill(_prev: FormState, fd: FormData): Promise<FormStat
       quantity: readNumber(String(l.quantity ?? "")),
       taxable: l.taxable !== false,
       note: String(l.note ?? "").trim(),
+      contract_id: typeof l.contract_id === "string" && l.contract_id ? l.contract_id : null,
+      count_no: readNumber(String(l.count_no ?? "")),
+      service_month: typeof l.service_month === "string" && /^\d{4}-\d{2}-01$/.test(l.service_month) ? l.service_month : null,
     }))
     // 何も入れていない行は無視する
-    .filter((l) => l.description || l.unit_price !== null || l.note);
+    .filter((l) => l.description || l.unit_price !== null || l.note || l.contract_id);
 
   if (lines.length === 0) errs.add("lines", "明細を1行以上入れてください");
   lines.forEach((l, i) => {
@@ -58,6 +70,9 @@ export async function saveBill(_prev: FormState, fd: FormData): Promise<FormStat
     if (l.quantity === null || l.quantity === 0) errs.add(`line-${i}-quantity`, `${n}行目の個数を入れてください`);
     else if (!hasAtMost2Decimals(l.quantity)) {
       errs.add(`line-${i}-quantity`, `${n}行目の個数は小数第2位までにしてください`);
+    }
+    if (l.contract_id && (l.count_no === null || !Number.isInteger(l.count_no) || l.count_no < 1)) {
+      errs.add(`line-${i}-count_no`, `${n}行目の回数を1以上の整数で入れてください`);
     }
   });
   if (errs.any) return errs.state();
@@ -75,7 +90,7 @@ export async function saveBill(_prev: FormState, fd: FormData): Promise<FormStat
       send_method: sendMethod,
       memo: text(fd, "memo"),
     },
-    p_lines: lines.map((l) => ({ ...l, quantity: l.quantity ?? 1 })),
+    p_lines: lines.map((l) => ({ ...l, quantity: l.quantity ?? 1, count_no: l.contract_id ? l.count_no : null })),
   });
   if (error) {
     if (error.code === "40001") return { ok: false, message: CONFLICT_MESSAGE };

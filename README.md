@@ -55,7 +55,7 @@
 
 1. **SQL Editor** → **New query** に `supabase/migrations/0002_billing_drafts.sql` の中身をすべて貼り付ける
 2. **Run** を押す。「Success. No rows returned」と出ればOK
-3. `0003_bills.sql`（請求の入力）も同じように実行する
+3. `0003_bills.sql`（請求の入力）、`0004_bill_line_contract.sql`（明細と契約のつながり）も、番号の順に同じように実行する
 
 ### 2-2. 旧Excelの企業と契約を取り込む
 

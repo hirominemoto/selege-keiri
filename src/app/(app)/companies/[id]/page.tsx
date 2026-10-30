@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
-import { monthName, nextCount } from "@/lib/contract";
+import { CompanyBillingPanel } from "@/components/CompanyBillingPanel";
+import { monthName } from "@/lib/contract";
+import { loadContractStates, loadPreviousBills, loadTaxSettings } from "@/app/(app)/bills/formData";
 import { currentMonthJst } from "@/lib/dates";
 import {
   contractKindLabel,
@@ -74,24 +76,16 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
   if (!companyData) notFound();
   const company = companyData as Company;
 
-  const [{ data: contractData }, { data: requestData }, { data: aliasData }] = await Promise.all([
+  const [{ data: contractData }, { data: aliasData }, states, previous, tax] = await Promise.all([
     supabase.from("contracts").select("*").eq("company_id", id).order("status").order("name").order("cohort"),
-    supabase
-      .from("billing_requests")
-      .select("contract_id, count_no")
-      .eq("company_id", id)
-      .eq("kind", "normal")
-      .eq("status", "active"),
     supabase.from("company_aliases").select("alias").eq("company_id", id).order("alias"),
+    loadContractStates(id),
+    loadPreviousBills(id),
+    loadTaxSettings(),
   ]);
   const contracts = (contractData ?? []) as Contract[];
-  // 契約ごとの、アプリで請求した最大の回数
-  const maxCount = new Map<string, number>();
-  for (const r of requestData ?? []) {
-    if (r.contract_id && r.count_no !== null) {
-      maxCount.set(r.contract_id, Math.max(maxCount.get(r.contract_id) ?? 0, r.count_no));
-    }
-  }
+  // 契約ごとの、次に請求する回数（アプリ導入前の回数とアプリの最大の大きいほう + 1）
+  const nextCountOf = new Map(states.map((s) => [s.id, s.next_count]));
 
   // 変更履歴（管理者だけ見られる）
   let audits: AuditRow[] = [];
@@ -140,6 +134,27 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
           </Link>
         )}
       </div>
+
+      <section className="card">
+        <div className="page-head" style={{ marginBottom: 8 }}>
+          <h2 style={{ margin: 0 }}>請求状況</h2>
+          {user.role === "admin" && company.is_active && (
+            <Link href={`/bills/new?company=${id}`} className="btn">
+              当月の請求を入力
+            </Link>
+          )}
+        </div>
+        <CompanyBillingPanel
+          contracts={states}
+          previous={previous[id]}
+          accountingMonth={thisMonth}
+          taxRate={tax.taxRate}
+          taxRounding={tax.taxRounding}
+        />
+        <p className="small" style={{ marginTop: 8 }}>
+          <Link href={`/bills?company=${id}`}>この企業の請求をすべて見る</Link>
+        </p>
+      </section>
 
       <section className="card">
         <h2>宛名と送り方</h2>
@@ -208,7 +223,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
               </thead>
               <tbody>
                 {contracts.map((c) => {
-                  const n = nextCount(c.base_count, maxCount.get(c.id) ?? null);
+                  const n = nextCountOf.get(c.id) ?? c.base_count + 1;
                   const over = c.total_count !== null && n > c.total_count;
                   return (
                     <tr key={c.id}>
