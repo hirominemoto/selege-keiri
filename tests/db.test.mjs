@@ -874,4 +874,16 @@ await test("契約の行：ほかの企業の契約にはつなげられない",
     /選んだ企業の契約ではありません/);
 });
 
+await test("請求済み：送った日がないと「請求済み」にできず、請求済みの請求は直せない・消せない", async () => {
+  const id = (await saveBill(null, null, billHead(), [{ description: "送付のテスト", unit_price: 1000, quantity: 1 }])).id;
+  await db.exec(`select set_config('app.bill_unlock', 'on', false)`);
+  await db.query(`update public.bills set status = 'issued', invoice_no = '2711-91', issued_at = now() where id = $1`, [id]);
+  await rejects(`update public.bills set status = 'sent' where id = $1`, [id], /check/i);
+  await db.query(`update public.bills set status = 'sent', sent_on = '2026-11-30', sent_at = now() where id = $1`, [id]);
+  await db.exec(`select set_config('app.bill_unlock', '', false)`);
+  await rejects(`update public.bills set memo = 'x' where id = $1`, [id], /作り直す/);
+  await rejects(`update public.bill_lines set note = 'x' where bill_id = $1`, [id], /作り直す/);
+  await rejects(`select public.bill_delete_draft($1)`, [id], /消せません/);
+});
+
 console.log(`\n${passed} 件成功${process.exitCode ? "（失敗あり）" : ""}`);

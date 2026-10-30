@@ -1,5 +1,5 @@
 import type { TaxRounding } from "@/lib/billing";
-import type { ContractState } from "@/lib/bills";
+import type { AppEntry, ContractState } from "@/lib/bills";
 import type { CompanyOption } from "@/components/BillForm";
 import type { PreviousBill } from "@/components/CompanyBillingPanel";
 import { createClient } from "@/lib/supabase/server";
@@ -10,6 +10,9 @@ type BillRow = {
   issue_date: string;
   accounting_month: string;
   invoice_no: string | null;
+  status: PreviousBill["status"];
+  sent_on: string | null;
+  send_method: "post" | "email";
   bill_lines: { description: string; unit_price: number; quantity: number; amount: number; taxable: boolean; sort: number }[];
 };
 
@@ -18,14 +21,41 @@ export async function loadContractStates(companyId?: string): Promise<ContractSt
   const supabase = await createClient();
   let q = supabase
     .from("contracts")
-    .select("id, company_id, name, cohort, kind, status, quantity, unit_price, taxable, service_month_offset, total_count, count_unit, description_template, start_month, end_month")
+    .select("id, company_id, name, cohort, kind, status, quantity, unit_price, taxable, service_month_offset, total_count, count_unit, description_template, start_month, end_month, base_count, legacy_last_service_month")
     .order("name")
     .order("cohort");
   if (companyId) q = q.eq("company_id", companyId);
-  const [{ data: contracts }, { data: counts }] = await Promise.all([
+  let lq = supabase
+    .from("bill_lines")
+    .select("contract_id, count_no, service_month, bills!inner(id, company_id, status, invoice_no, sent_on, send_method)")
+    .not("contract_id", "is", null);
+  if (companyId) lq = lq.eq("bills.company_id", companyId);
+  const [{ data: contracts }, { data: counts }, { data: lineData }] = await Promise.all([
     q,
     supabase.rpc("contract_next_counts", { p_company_id: companyId ?? null }),
+    lq,
   ]);
+  type LineRow = {
+    contract_id: string;
+    count_no: number | null;
+    service_month: string | null;
+    bills: { id: string; status: AppEntry["status"]; invoice_no: string | null; sent_on: string | null; send_method: "post" | "email" };
+  };
+  const entries = new Map<string, AppEntry[]>();
+  for (const l of (lineData ?? []) as unknown as LineRow[]) {
+    if (!l.service_month) continue;
+    const list = entries.get(l.contract_id) ?? [];
+    list.push({
+      bill_id: l.bills.id,
+      service_month: l.service_month,
+      count_no: l.count_no,
+      status: l.bills.status,
+      invoice_no: l.bills.invoice_no,
+      sent_on: l.bills.sent_on,
+      send_method: l.bills.send_method,
+    });
+    entries.set(l.contract_id, list);
+  }
   const byId = new Map(
     ((counts ?? []) as { contract_id: string; last_count: number | null; next_count: number; last_service_month: string | null }[]).map(
       (r) => [r.contract_id, r],
@@ -36,6 +66,7 @@ export async function loadContractStates(companyId?: string): Promise<ContractSt
     return {
       ...c,
       quantity: Number(c.quantity),
+      app_entries: (entries.get(c.id) ?? []).sort((a, b) => b.service_month.localeCompare(a.service_month)),
       last_count: n?.last_count ?? null,
       next_count: n?.next_count ?? 1,
       last_service_month: n?.last_service_month ?? null,
@@ -48,7 +79,7 @@ export async function loadPreviousBills(companyId?: string, excludeBillId?: stri
   const supabase = await createClient();
   let q = supabase
     .from("bills")
-    .select("id, company_id, issue_date, accounting_month, invoice_no, bill_lines(description, unit_price, quantity, amount, taxable, sort)")
+    .select("id, company_id, issue_date, accounting_month, invoice_no, status, sent_on, send_method, bill_lines(description, unit_price, quantity, amount, taxable, sort)")
     .order("issue_date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(companyId ? 5 : 500);
@@ -62,6 +93,9 @@ export async function loadPreviousBills(companyId?: string, excludeBillId?: stri
       issue_date: b.issue_date,
       accounting_month: b.accounting_month,
       invoice_no: b.invoice_no,
+      status: b.status,
+      sent_on: b.sent_on,
+      send_method: b.send_method,
       lines: [...b.bill_lines].sort((x, y) => x.sort - y.sort).map((l) => ({ ...l, quantity: Number(l.quantity) })),
     };
   }

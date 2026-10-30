@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ConfirmButton } from "@/components/InvoiceDraftForms";
 import { requireUser } from "@/lib/auth";
 import { invoiceTotals, type TaxRounding } from "@/lib/billing";
-import { billStatusLabel, type Bill, type BillLine } from "@/lib/bills";
+import { billStatusText, type Bill, type BillLine } from "@/lib/bills";
 import { dateLabel, dateTimeLabel, monthLabel, sendMethodLabel, yen } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { deleteBill } from "../actions";
@@ -44,8 +44,7 @@ export default async function BillPage({
         <div>
           <h1>{bill.companies?.name ?? "（企業が見つかりません）"}</h1>
           <p className="lead">
-            <span className={`badge ${isDraft ? "" : "badge-active"}`}>{billStatusLabel[bill.status]}</span>{" "}
-            {bill.invoice_no && <>請求書№ {bill.invoice_no}　</>}
+            <span className={`badge ${isDraft ? "" : "badge-active"}`}>{billStatusText(bill)}</span>{" "}
             請求日 {dateLabel(bill.issue_date)}　計上月 {monthLabel(bill.accounting_month)}
           </p>
         </div>
@@ -132,10 +131,13 @@ export default async function BillPage({
       {canEdit && isDraft && (
         <div className="card">
           <h2>このあと</h2>
-          <p className="muted">「請求書を作る」「Excelに書き込む」は、次の段階で作ります。</p>
+          <p className="muted">
+            この請求は、まだアプリに入力しただけです。「請求書を作る」（請求書作成済みにする）、「送った」（請求済みにする）、
+            「Excelに書き込む」（企業シート・売上表・収支一覧への記入）は、次の段階で作ります。
+          </p>
           <form action={deleteBill} className="form-actions">
             <input type="hidden" name="id" value={bill.id} />
-            <ConfirmButton message="この請求を消します。よろしいですか？（入力中なので、消しても請求書番号は使われません）" className="btn btn-danger-quiet">
+            <ConfirmButton message="この請求を消します。よろしいですか？（まだ請求書を作っていないので、請求書番号は使われません）" className="btn btn-danger-quiet">
               この請求を消す
             </ConfirmButton>
           </form>

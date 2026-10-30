@@ -3,7 +3,7 @@
 import { addMonths, monthEnd } from "@/lib/billing";
 import { monthName, renderTemplate } from "@/lib/contract";
 
-export type BillStatus = "draft" | "issued";
+export type BillStatus = "draft" | "issued" | "sent";
 
 export type Bill = {
   id: string;
@@ -17,6 +17,7 @@ export type Bill = {
   status: BillStatus;
   invoice_no: string | null;
   issued_at: string | null;
+  sent_on: string | null;
   version: number;
   created_at: string;
   updated_at: string;
@@ -37,9 +38,37 @@ export type BillLine = {
   service_month: string | null;
 };
 
+/** 状態の言葉。場所（アプリ・企業シートなど）をかならず入れる */
 export const billStatusLabel: Record<BillStatus, string> = {
-  draft: "入力中",
-  issued: "請求書あり",
+  draft: "アプリに入力済み",
+  issued: "請求書作成済み",
+  sent: "請求済み",
+};
+
+/** 状態の言葉＋番号・送った日（例：請求済み（11/30 郵送）） */
+export function billStatusText(b: {
+  status: BillStatus;
+  invoice_no: string | null;
+  sent_on: string | null;
+  send_method: "post" | "email";
+}): string {
+  if (b.status === "sent" && b.sent_on) {
+    const [, m, d] = b.sent_on.split("-").map(Number);
+    return `請求済み（${m}/${d} ${b.send_method === "email" ? "メール" : "郵送"}）`;
+  }
+  if (b.status === "issued") return `請求書作成済み${b.invoice_no ? `（№${b.invoice_no}）` : ""}`;
+  return billStatusLabel[b.status];
+}
+
+/** アプリで入れた、契約の1か月分 */
+export type AppEntry = {
+  bill_id: string;
+  service_month: string;
+  count_no: number | null;
+  status: BillStatus;
+  invoice_no: string | null;
+  sent_on: string | null;
+  send_method: "post" | "email";
 };
 
 /** フォームの明細1行（入力途中なので数字は文字のまま持つ） */
@@ -73,6 +102,9 @@ export type ContractState = {
   description_template: string | null;
   start_month: string | null;
   end_month: string | null;
+  base_count: number; // 企業シート（旧Excel）に記入済みの最後の回数
+  legacy_last_service_month: string | null; // 企業シート（旧Excel）に記入済みの最後の「◯月分」
+  app_entries: AppEntry[]; // アプリで入れた分（新しい月から）
   last_count: number | null;
   next_count: number;
   last_service_month: string | null;

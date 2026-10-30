@@ -76,10 +76,10 @@ begin
   if new.company_id is distinct from old.company_id and old.status <> 'draft' then
     raise exception '請求書を作ったあとは企業を変えられません';
   end if;
-  if old.status = 'issued' and not public.bill_is_unlocked() then
+  if old.status <> 'draft' and not public.bill_is_unlocked() then
     raise exception '請求書を作ったあとは、ここでは直せません。「作り直す」から直してください';
   end if;
-  if old.status = 'draft' and new.status = 'issued' and not public.bill_is_unlocked() then
+  if old.status = 'draft' and new.status <> 'draft' and not public.bill_is_unlocked() then
     raise exception '請求書は「請求書を作る」ボタンから作ります';
   end if;
   return new;
@@ -99,7 +99,7 @@ declare
   st text;
 begin
   select status into st from public.bills where id = coalesce(new.bill_id, old.bill_id);
-  if st = 'issued' and not public.bill_is_unlocked() then
+  if st is distinct from 'draft' and st is not null and not public.bill_is_unlocked() then
     raise exception '請求書を作ったあとは明細を直せません。「作り直す」から直してください';
   end if;
   return coalesce(new, old);

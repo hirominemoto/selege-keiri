@@ -28,7 +28,7 @@ export default async function EditBillPage({ params }: { params: Promise<{ id: s
       <div className="page-head">
         <div>
           <h1>請求を直す</h1>
-          <p className="lead">入力中なので、自由に直せます。</p>
+          <p className="lead">まだ請求書を作っていないので、自由に直せます。</p>
         </div>
       </div>
       <BillForm {...data} defaultStaff={user.displayName ?? ""} today={todayJst()} bill={bill as Bill} lines={(lines ?? []) as BillLine[]} />

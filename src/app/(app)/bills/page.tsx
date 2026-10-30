@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { addMonths, invoiceTotals, parseMonth, type TaxRounding } from "@/lib/billing";
-import { billStatusLabel, type BillStatus } from "@/lib/bills";
+import { billStatusText, type BillStatus } from "@/lib/bills";
 import { currentMonthJst } from "@/lib/dates";
 import { dateLabel, monthLabel, sendMethodLabel, yen } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
@@ -11,6 +11,7 @@ type Row = {
   issue_date: string;
   status: BillStatus;
   invoice_no: string | null;
+  sent_on: string | null;
   send_method: "post" | "email";
   staff_name: string | null;
   companies: { name: string } | null;
@@ -30,7 +31,7 @@ export default async function BillsPage({
   // 企業のページから来たときは、その企業の請求を全部の月で出す
   let query = supabase
     .from("bills")
-    .select("id, issue_date, status, invoice_no, send_method, staff_name, companies(name), bill_lines(description, amount, taxable, sort)");
+    .select("id, issue_date, status, invoice_no, sent_on, send_method, staff_name, companies(name), bill_lines(description, amount, taxable, sort)");
   query = company
     ? query.eq("company_id", company).order("issue_date", { ascending: false })
     : query.eq("accounting_month", m).order("issue_date");
@@ -97,7 +98,7 @@ export default async function BillsPage({
           {companyRow ? "請求" : `${monthLabel(m)}の請求`}<strong>{rows.length}件</strong>
         </span>
         <span>
-          入力中<strong>{drafts}件</strong>
+          アプリに入力済み（請求書はまだ）<strong>{drafts}件</strong>
         </span>
         <span>
           合計（税込）<strong>{yen(sum)}</strong>
@@ -133,8 +134,7 @@ export default async function BillsPage({
                   <td className="num">{yen(r.totals.total)}</td>
                   <td>{r.send_method === "email" ? "メール" : sendMethodLabel.post}</td>
                   <td>
-                    <span className={`badge ${r.status === "issued" ? "badge-active" : ""}`}>{billStatusLabel[r.status]}</span>
-                    {r.invoice_no && <span className="muted small">　{r.invoice_no}</span>}
+                    <span className={`badge ${r.status === "draft" ? "" : "badge-active"}`}>{billStatusText(r)}</span>
                   </td>
                 </tr>
               ))}
