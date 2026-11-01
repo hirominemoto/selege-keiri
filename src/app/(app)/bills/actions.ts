@@ -37,6 +37,8 @@ export async function saveBill(_prev: FormState, fd: FormData): Promise<FormStat
   if (!isDate(issueDate)) errs.add("issue_date", "請求日をカレンダーから選んでください");
   if (!month || !/^\d{4}-\d{2}$/.test(month)) errs.add("accounting_month", "計上月を選んでください");
   if (!isDate(due)) errs.add("payment_due_date", "支払期限をカレンダーから選んでください");
+  const staff = text(fd, "staff_name");
+  if (!staff) errs.add("staff_name", "入力した人を「社長」か「担当」から選んでください");
   if (isDate(issueDate) && isDate(due) && due < issueDate) {
     errs.add("payment_due_date", "支払期限が請求日より前になっています");
   }
@@ -86,7 +88,7 @@ export async function saveBill(_prev: FormState, fd: FormData): Promise<FormStat
       issue_date: issueDate,
       accounting_month: `${month}-01`,
       payment_due_date: due,
-      staff_name: text(fd, "staff_name"),
+      staff_name: staff,
       send_method: sendMethod,
       memo: text(fd, "memo"),
     },
