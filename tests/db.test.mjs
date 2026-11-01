@@ -886,4 +886,34 @@ await test("請求済み：送った日がないと「請求済み」にでき�
   await rejects(`select public.bill_delete_draft($1)`, [id], /消せません/);
 });
 
+// ---- 企業シートの取り込み（0006） ----
+await test("企業シート：取り込むと入れ替わり、計上月は請求日の月になる", async () => {
+  await as(U1);
+  const cid = (await one(`insert into public.companies (name) values ('取り込みテスト株式会社') returning id`)).id;
+  const row = (no, date, amount, extra = {}) => ({
+    company_id: cid, sheet_name: "取り込みテスト", row_no: no, issue_date: date, description: ` 在留サポート ${no} `,
+    unit_price: null, quantity: null, amount, note: "", sheet_month_label: "9月", payment_due_date: null, ...extra,
+  });
+  const n1 = (await one(`select public.legacy_sheet_import($1::jsonb) as n`, [JSON.stringify([row(7, "2026-09-30", 1000), row(8, "2026-10-31", 2000)])])).n;
+  assert.equal(n1, 2);
+  const r = await one(`select accounting_month::text as m, description, note, sheet_month_label from public.legacy_sheet_rows where row_no = 8`);
+  assert.deepEqual([r.m, r.description, r.note, r.sheet_month_label], ["2026-10-01", "在留サポート 8", null, "9月"]); // H列の「9月」ではなく請求日の月
+  const n2 = (await one(`select public.legacy_sheet_import($1::jsonb) as n`, [JSON.stringify([row(7, "2026-09-30", 1000)])])).n;
+  assert.equal(n2, 1);
+  assert.equal((await one(`select count(*)::int as c from public.legacy_sheet_rows`)).c, 1); // 前の行は残らない
+});
+
+await test("企業シート：空の取り込みと、管理者でない人の取り込みはできない", async () => {
+  await as(U1);
+  await rejects(`select public.legacy_sheet_import('[]'::jsonb)`, [], /取り込む行がありません/);
+  await as(U2);
+  await rejects(`select public.legacy_sheet_import('[{}]'::jsonb)`, [], /管理者だけ/);
+  await as(U1);
+  assert.equal((await one(`select count(*)::int as c from public.legacy_sheet_rows`)).c, 1); // 失敗しても消えない
+});
+
+await test("企業シート：請求済みとみなす日付の設定が入る", async () => {
+  assert.equal((await one(`select value #>> '{}' as v from public.app_settings where key = 'legacy_billed_until'`)).v, "2026-10-31");
+});
+
 console.log(`\n${passed} 件成功${process.exitCode ? "（失敗あり）" : ""}`);

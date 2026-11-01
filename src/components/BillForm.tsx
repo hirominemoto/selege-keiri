@@ -19,6 +19,8 @@ import {
   type LineDraft,
 } from "@/lib/bills";
 import { CompanyBillingPanel, type PreviousBill } from "@/components/CompanyBillingPanel";
+import { CompanyHistory } from "@/components/CompanyHistory";
+import type { HistoryEntry } from "@/lib/history";
 import { monthLabel, yen } from "@/lib/format";
 
 export type CompanyOption = {
@@ -53,6 +55,7 @@ export function BillForm(props: {
   companies: CompanyOption[];
   contractsByCompany: Record<string, ContractState[]>;
   previous: Record<string, PreviousBill>;
+  history: Record<string, HistoryEntry[]>;
   initialCompanyId?: string; // 企業のページから来たとき
   taxRate: number;
   taxRounding: TaxRounding;
@@ -214,6 +217,13 @@ export function BillForm(props: {
             ))}
           </select>
         </Field>
+
+        {company && (
+          <details className="billing-panel-wrap">
+            <summary>この企業の請求の履歴（{(props.history[company.id] ?? []).filter((e) => e.source !== "due" && !(b && e.bill_id === b.id)).length}件）</summary>
+            <CompanyHistory entries={props.history[company.id] ?? []} companyId={company.id} mode="form" currentBillId={b?.id} />
+          </details>
+        )}
 
         {company && (
           <details className="billing-panel-wrap" open>

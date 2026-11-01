@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { CompanyBillingPanel } from "@/components/CompanyBillingPanel";
 import { monthName } from "@/lib/contract";
-import { loadContractStates, loadPreviousBills, loadTaxSettings } from "@/app/(app)/bills/formData";
+import { loadContractStates, loadHistory, loadPreviousBills, loadTaxSettings } from "@/app/(app)/bills/formData";
+import { CompanyHistory } from "@/components/CompanyHistory";
 import { currentMonthJst } from "@/lib/dates";
 import {
   contractKindLabel,
@@ -84,6 +85,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
     loadTaxSettings(),
   ]);
   const contracts = (contractData ?? []) as Contract[];
+  const history = (await loadHistory(states, id))[id] ?? [];
   // 契約ごとの、次に請求する回数（アプリ導入前の回数とアプリの最大の大きいほう + 1）
   const nextCountOf = new Map(states.map((s) => [s.id, s.next_count]));
 
@@ -154,6 +156,11 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
         <p className="small" style={{ marginTop: 8 }}>
           <Link href={`/bills?company=${id}`}>この企業の請求をすべて見る</Link>
         </p>
+      </section>
+
+      <section className="card">
+        <h2>請求の履歴</h2>
+        <CompanyHistory entries={history} companyId={id} mode="page" />
       </section>
 
       <section className="card">
