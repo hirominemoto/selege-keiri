@@ -11,7 +11,7 @@ const menus = [
   {
     num: "2",
     title: "Excelに書き込む",
-    desc: "入力した請求を、社内申込書・売上表・収支一覧に書き込みます",
+    desc: "入力した請求を、企業シート・売上表・収支一覧に書き込みます",
     href: "/excel",
     ready: false,
   },

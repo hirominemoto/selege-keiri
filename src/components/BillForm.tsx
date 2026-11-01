@@ -317,7 +317,7 @@ export function BillForm(props: {
 
       <div className="card form-section">
         <h2>明細</h2>
-        <p className="muted small">1行が、企業別シート・売上表・収支一覧のそれぞれ1行になります。内訳の書き方は自由です。</p>
+        <p className="muted small">1行が、企業シート・売上表・収支一覧のそれぞれ1行になります。内訳の書き方は自由です。</p>
         {lineErrors.length > 0 && (
           <div className="notice notice-error" role="alert">
             <ul>
@@ -385,7 +385,7 @@ export function BillForm(props: {
                     />
                   </Field>
                 )}
-                <Field label="備考" name={`n-${l.key}`} hint="企業別シートのG列「備考」に入ります">
+                <Field label="備考" name={`n-${l.key}`} hint="企業シートのG列「備考」に入ります">
                   <input id={`n-${l.key}`} type="text" value={l.note} onChange={(ev) => update(l.key, { note: ev.target.value })} />
                 </Field>
                 <div className="field">
