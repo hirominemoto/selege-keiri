@@ -27,8 +27,11 @@ export type BillForExcel = {
 };
 
 const monthNo = (d: string) => Number(d.slice(5, 7));
-/** 売上表の税込（今の式 =G×1.1）。消費税のかからない行は金額のまま */
-const withTax = (amount: number, taxable: boolean) => (taxable ? Math.round(amount * 1.1) : amount);
+/**
+ * 税込（今の式 =G×1.1 をそのまま再現する。丸めない）。消費税のかからない行は金額のまま
+ * 請求書の消費税は請求書全体でまとめて端数処理するので、10円単位でない行は請求書と少しずれることがある
+ */
+const withTax = (amount: number, taxable: boolean) => (taxable ? (amount * 11) / 10 : amount);
 
 export function excelRowsForBill(bill: BillForExcel, companySheetName: string | null): ExcelRows[] {
   const m = monthNo(bill.accounting_month);
@@ -129,6 +132,7 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
     ]),
     notes: [
       "入金日・入金金額は空けておきます（ひろみさんが記入）",
+      "税込金額も =受注金額×1.1 の式で入れます（10円単位でない行は小数が出て、請求書の消費税と少しずれることがあります）",
       `${m}月の合計は、月ごとの一覧（収支一覧表）に式で出ます`,
     ],
   };

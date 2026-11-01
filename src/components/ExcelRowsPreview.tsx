@@ -2,7 +2,7 @@ import type { ExcelCell, ExcelRows } from "@/lib/excelRows";
 
 const show = (v: ExcelCell) => {
   if (v === null || v === "") return <span className="muted">（空）</span>;
-  if (typeof v === "number") return v.toLocaleString("ja-JP");
+  if (typeof v === "number") return v.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v.replaceAll("-", "/");
   return v;
 };
