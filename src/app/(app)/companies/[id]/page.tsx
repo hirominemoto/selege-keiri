@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { CompanyBillingPanel } from "@/components/CompanyBillingPanel";
 import { monthName } from "@/lib/contract";
-import { loadContractStates, loadHistory, loadPreviousBills, loadTaxSettings } from "@/app/(app)/bills/formData";
+import { loadContractStates, loadHistory } from "@/app/(app)/bills/formData";
 import { CompanyHistory } from "@/components/CompanyHistory";
 import { currentMonthJst } from "@/lib/dates";
 import {
@@ -84,12 +84,10 @@ export default async function CompanyPage({
   if (!companyData) notFound();
   const company = companyData as Company;
 
-  const [{ data: contractData }, { data: aliasData }, states, previous, tax] = await Promise.all([
+  const [{ data: contractData }, { data: aliasData }, states] = await Promise.all([
     supabase.from("contracts").select("*").eq("company_id", id).order("status").order("name").order("cohort"),
     supabase.from("company_aliases").select("alias").eq("company_id", id).order("alias"),
     loadContractStates(id),
-    loadPreviousBills(id),
-    loadTaxSettings(),
   ]);
   const contracts = (contractData ?? []) as Contract[];
   const history = (await loadHistory(states, id))[id] ?? [];
@@ -153,13 +151,7 @@ export default async function CompanyPage({
             </Link>
           )}
         </div>
-        <CompanyBillingPanel
-          contracts={states}
-          previous={previous[id]}
-          accountingMonth={thisMonth}
-          taxRate={tax.taxRate}
-          taxRounding={tax.taxRounding}
-        />
+        <CompanyBillingPanel contracts={states} accountingMonth={thisMonth} />
         <p className="small" style={{ marginTop: 8 }}>
           <Link href={`/companies/${id}?history=all#history`}>この企業の請求をすべて見る</Link>
         </p>

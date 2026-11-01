@@ -18,7 +18,7 @@ import {
   type ContractState,
   type LineDraft,
 } from "@/lib/bills";
-import { CompanyBillingPanel, type PreviousBill } from "@/components/CompanyBillingPanel";
+import { CompanyBillingPanel } from "@/components/CompanyBillingPanel";
 import { CompanyHistory } from "@/components/CompanyHistory";
 import type { HistoryEntry } from "@/lib/history";
 import { monthLabel, yen } from "@/lib/format";
@@ -54,7 +54,6 @@ function contractLines(contracts: ContractState[], accountingMonth: string): Lin
 export function BillForm(props: {
   companies: CompanyOption[];
   contractsByCompany: Record<string, ContractState[]>;
-  previous: Record<string, PreviousBill>;
   history: Record<string, HistoryEntry[]>;
   initialCompanyId?: string; // 企業のページから来たとき
   taxRate: number;
@@ -227,14 +226,8 @@ export function BillForm(props: {
 
         {company && (
           <details className="billing-panel-wrap" open>
-            <summary>この企業の請求状況（回数・前回の請求）</summary>
-            <CompanyBillingPanel
-              contracts={contracts}
-              previous={props.previous[company.id]}
-              accountingMonth={monthStart}
-              taxRate={props.taxRate}
-              taxRounding={props.taxRounding}
-            />
+            <summary>この企業の契約と回数</summary>
+            <CompanyBillingPanel contracts={contracts} accountingMonth={monthStart} />
           </details>
         )}
 

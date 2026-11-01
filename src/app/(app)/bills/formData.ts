@@ -1,22 +1,9 @@
 import type { TaxRounding } from "@/lib/billing";
 import type { AppEntry, ContractState } from "@/lib/bills";
 import type { CompanyOption } from "@/components/BillForm";
-import type { PreviousBill } from "@/components/CompanyBillingPanel";
 import { createClient } from "@/lib/supabase/server";
 import { buildHistory, type BillIn, type HistoryEntry, type SheetRowIn } from "@/lib/history";
 import { currentMonthJst } from "@/lib/dates";
-
-type BillRow = {
-  id: string;
-  company_id: string;
-  issue_date: string;
-  accounting_month: string;
-  invoice_no: string | null;
-  status: PreviousBill["status"];
-  sent_on: string | null;
-  send_method: "post" | "email";
-  bill_lines: { description: string; unit_price: number; quantity: number; amount: number; taxable: boolean; sort: number }[];
-};
 
 /** 契約と回数（companyId を渡すとその企業だけ） */
 export async function loadContractStates(companyId?: string): Promise<ContractState[]> {
@@ -76,34 +63,6 @@ export async function loadContractStates(companyId?: string): Promise<ContractSt
   });
 }
 
-/** 企業ごとの前回の請求（companyId を渡すとその企業だけ）。excludeBillId は今直している請求 */
-export async function loadPreviousBills(companyId?: string, excludeBillId?: string): Promise<Record<string, PreviousBill>> {
-  const supabase = await createClient();
-  let q = supabase
-    .from("bills")
-    .select("id, company_id, issue_date, accounting_month, invoice_no, status, sent_on, send_method, bill_lines(description, unit_price, quantity, amount, taxable, sort)")
-    .order("issue_date", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(companyId ? 5 : 500);
-  if (companyId) q = q.eq("company_id", companyId);
-  const { data } = await q;
-  const previous: Record<string, PreviousBill> = {};
-  for (const b of (data ?? []) as BillRow[]) {
-    if (b.id === excludeBillId || previous[b.company_id]) continue;
-    previous[b.company_id] = {
-      id: b.id,
-      issue_date: b.issue_date,
-      accounting_month: b.accounting_month,
-      invoice_no: b.invoice_no,
-      status: b.status,
-      sent_on: b.sent_on,
-      send_method: b.send_method,
-      lines: [...b.bill_lines].sort((x, y) => x.sort - y.sort).map((l) => ({ ...l, quantity: Number(l.quantity) })),
-    };
-  }
-  return previous;
-}
-
 export async function loadTaxSettings(): Promise<{ taxRate: number; taxRounding: TaxRounding }> {
   const supabase = await createClient();
   const { data } = await supabase.from("app_settings").select("key, value").in("key", ["tax_rate", "tax_rounding"]);
@@ -157,16 +116,15 @@ export async function loadHistory(contracts: ContractState[], companyId?: string
 }
 
 /** 入力フォームに必要なもの：企業の一覧、企業ごとの契約と回数、前回の請求、税率 */
-export async function loadBillFormData(excludeBillId?: string) {
+export async function loadBillFormData() {
   const supabase = await createClient();
-  const [{ data: companyData }, contracts, previous, tax] = await Promise.all([
+  const [{ data: companyData }, contracts, tax] = await Promise.all([
     supabase
       .from("companies")
       .select("id, name, send_method, payment_due_months, payment_due_day")
       .eq("is_active", true)
       .order("name"),
     loadContractStates(),
-    loadPreviousBills(undefined, excludeBillId),
     loadTaxSettings(),
   ]);
   const contractsByCompany: Record<string, ContractState[]> = {};
@@ -176,7 +134,6 @@ export async function loadBillFormData(excludeBillId?: string) {
     companies: (companyData ?? []) as CompanyOption[],
     contractsByCompany,
     history,
-    previous,
     ...tax,
   };
 }

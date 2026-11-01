@@ -1,34 +1,16 @@
 import Link from "next/link";
-import { invoiceTotals, type TaxRounding } from "@/lib/billing";
-import { billStatusText, type BillStatus, contractLabel, serviceMonthOf, type ContractState } from "@/lib/bills";
-import { contractKindLabel, countLabel, dateLabel, monthLabel, yen } from "@/lib/format";
-
-/** 企業ごとの前回の請求 */
-export type PreviousBill = {
-  id: string;
-  issue_date: string;
-  accounting_month: string;
-  invoice_no: string | null;
-  status: BillStatus;
-  sent_on: string | null;
-  send_method: "post" | "email";
-  lines: { description: string; unit_price: number; quantity: number; amount: number; taxable: boolean }[];
-};
+import { billStatusText, contractLabel, serviceMonthOf, type ContractState } from "@/lib/bills";
+import { contractKindLabel, countLabel, monthLabel, yen } from "@/lib/format";
 
 /**
- * 企業の請求状況：契約ごとの回数（前回・今回）と、前回の請求の中身。
+ * 企業の請求状況：契約ごとの回数（前回・今回）。過去の請求の中身は「請求の履歴」（CompanyHistory）に出す。
  * 企業のページと入力フォームの両方で使う（画面だけの部品。データは呼ぶ側で用意する）
  */
 export function CompanyBillingPanel(props: {
   contracts: ContractState[];
-  previous?: PreviousBill;
   accountingMonth: string; // 今回の計上月 "2026-11-01"
-  taxRate: number;
-  taxRounding: TaxRounding;
 }) {
   const live = props.contracts.filter((c) => c.status !== "ended");
-  const prev = props.previous;
-  const prevTotal = prev ? invoiceTotals(prev.lines, props.taxRate, props.taxRounding).total : 0;
 
   return (
     <div className="billing-panel">
@@ -101,52 +83,6 @@ export function CompanyBillingPanel(props: {
         </div>
       )}
 
-      <h3>前回の請求</h3>
-      {!prev ? (
-        <p className="muted small">アプリに入力した請求はまだありません（旧Excelの分は、上の「これまで」に出ています）。</p>
-      ) : (
-        <>
-          <p className="small">
-            <Link href={`/bills/${prev.id}`}>
-              請求日 {dateLabel(prev.issue_date)}（{monthLabel(prev.accounting_month)}計上）
-            </Link>
-            <span className="muted">　{billStatusText(prev)}</span>
-          </p>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>内訳</th>
-                  <th className="num">単価</th>
-                  <th className="num">個数</th>
-                  <th className="num">金額（税抜）</th>
-                </tr>
-              </thead>
-              <tbody>
-                {prev.lines.map((l, i) => (
-                  <tr key={i}>
-                    <td>
-                      {l.description}
-                      {!l.taxable && <span className="badge" style={{ marginLeft: 6 }}>消費税なし</span>}
-                    </td>
-                    <td className="num">{yen(l.unit_price)}</td>
-                    <td className="num">{Number(l.quantity)}</td>
-                    <td className="num">{yen(l.amount)}</td>
-                  </tr>
-                ))}
-                <tr>
-                  <td colSpan={3} className="num">
-                    合計（税込）
-                  </td>
-                  <td className="num">
-                    <strong>{yen(prevTotal)}</strong>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
     </div>
   );
 }
