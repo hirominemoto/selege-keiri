@@ -14,11 +14,13 @@ export function CompanyHistory({
   companyId,
   mode,
   currentBillId,
+  showAll = false,
 }: {
   entries: HistoryEntry[];
   companyId: string;
   mode: "page" | "form";
   currentBillId?: string;
+  showAll?: boolean; // 「この企業の請求をすべて見る」から来たときは、前の請求も開いておく
 }) {
   const list = entries.filter((e) => !(currentBillId && e.bill_id === currentBillId) && !(mode === "form" && e.source === "due"));
   if (list.length === 0) return <p className="muted small">まだ請求の履歴はありません。</p>;
@@ -91,7 +93,7 @@ export function CompanyHistory({
     <>
       {table(head)}
       {rest.length > 0 && (
-        <details className="history-older">
+        <details className="history-older" open={showAll}>
           <summary>それより前の請求を見る（{months.length - recent.size}か月ぶん）</summary>
           {table(rest)}
         </details>
