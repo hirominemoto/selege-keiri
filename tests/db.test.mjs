@@ -671,4 +671,219 @@ await test("すべての業務テーブルでアクセス制御（RLS）が有�
   assert.deepEqual(r.map((x) => x.relname), []);
 });
 
+// =====================================================================
+// 「今月の請求」画面：契約から下書きをまとめて作る（0002_billing_drafts.sql）
+// =====================================================================
+
+let bCo1, bCo2, bC1, bC2, bC3;
+const bItem = (contract, extra = {}) => ({
+  contract_id: contract, description: "2名分：在留サポートサービス：12月分（3回目/全24回）", count_no: 3, ...extra,
+});
+const createDrafts = async (month, items) =>
+  (await one(`select public.billing_create_drafts($1, $2::jsonb) as r`, [month, JSON.stringify(items)])).r;
+
+await test("今月の請求：選んだ契約から依頼・明細・下書きをまとめて作る（企業ごとに1枚、翌月分の契約は◯月分が翌月）", async () => {
+  bCo1 = (await one(`insert into public.companies (name) values ('請求画面テスト一') returning id`)).id;
+  bCo2 = (await one(`insert into public.companies (name) values ('請求画面テスト二') returning id`)).id;
+  bC1 = (await one(`insert into public.contracts (company_id, name, quantity, unit_price, service_month_offset)
+                    values ($1, '在留サポートサービス', 2, 36000, 1) returning id`, [bCo1])).id;
+  bC2 = (await one(`insert into public.contracts (company_id, name, cohort, quantity, unit_price)
+                    values ($1, '在留サポートサービス', '二期生', 1, 15000) returning id`, [bCo1])).id;
+  bC3 = (await one(`insert into public.contracts (company_id, name, quantity, unit_price)
+                    values ($1, '受入サポート', 1, 50000) returning id`, [bCo2])).id;
+  const r = await createDrafts("2026-11-01", [bItem(bC1), bItem(bC2, { count_no: null }), bItem(bC3)]);
+  assert.equal(r.created, 3);
+  assert.equal(r.skipped, 0);
+  assert.equal(r.invoices.length, 2);
+  const reqs = await all(`select r.contract_id, r.service_month::text as svc, r.invoice_id, r.count_no, l.amount, l.contract_amount
+                            from public.billing_requests r join public.billing_request_lines l on l.request_id = r.id
+                           where r.contract_id = any($1)`, [[bC1, bC2, bC3]]);
+  const c1 = reqs.find((x) => x.contract_id === bC1);
+  assert.equal(c1.svc, "2026-12-01");
+  assert.equal(c1.amount, 72000);
+  assert.equal(c1.contract_amount, 72000);
+  assert.equal(c1.count_no, 3);
+  assert.equal(reqs.find((x) => x.contract_id === bC2).svc, "2026-11-01");
+  assert.equal(reqs.find((x) => x.contract_id === bC2).count_no, null);
+  // 同じ企業の2件は同じ下書きに載る
+  assert.equal(c1.invoice_id, reqs.find((x) => x.contract_id === bC2).invoice_id);
+  const inv = await invoice(c1.invoice_id);
+  assert.equal(inv.status, "draft");
+  assert.equal(inv.send_method, null);
+  assert.equal(inv.invoice_no, null);
+});
+
+await test("今月の請求：2回押しても依頼は増えない。請求状況は「下書き」になる", async () => {
+  const r = await createDrafts("2026-11-01", [bItem(bC1), bItem(bC3)]);
+  assert.equal(r.created, 0);
+  assert.equal(r.skipped, 2);
+  const n = await one(`select count(*)::int as n from public.billing_requests where contract_id = any($1)`, [[bC1, bC2, bC3]]);
+  assert.equal(n.n, 3);
+  const s = await one(`select state from public.contract_billing_status('2026-12-01', '2026-12-01') where contract_id = $1`, [bC1]);
+  assert.equal(s.state, "draft");
+});
+
+await test("今月の請求：あとから同じ企業の契約を足すと、いまある下書きに載る", async () => {
+  const bC4 = (await one(`insert into public.contracts (company_id, name, quantity, unit_price)
+                          values ($1, '追加の契約', 1, 1000) returning id`, [bCo1])).id;
+  const r = await createDrafts("2026-11-01", [bItem(bC4)]);
+  assert.equal(r.created, 1);
+  const n = await one(`select count(distinct invoice_id)::int as n from public.billing_requests where company_id = $1`, [bCo1]);
+  assert.equal(n.n, 1);
+});
+
+await test("今月の請求：見るだけの人は下書きを作れない", async () => {
+  await as(U2);
+  await rejects(`select public.billing_create_drafts('2026-11-01', '[]'::jsonb)`, [], /管理者だけ/);
+  await as(U1);
+});
+
+await test("下書きの片付け：依頼・明細ごと消え、契約は「未請求」に戻る。番号の付いた請求書は片付けられない", async () => {
+  const invId = (await one(`select invoice_id from public.billing_requests where contract_id = $1`, [bC3])).invoice_id;
+  await db.query(`select public.invoice_discard_draft($1)`, [invId]);
+  assert.equal(await invoice(invId), undefined);
+  const n = await one(`select count(*)::int as n from public.billing_requests where contract_id = $1`, [bC3]);
+  assert.equal(n.n, 0);
+  const s = await one(`select state from public.contract_billing_status('2026-11-01', '2026-11-01') where contract_id = $1`, [bC3]);
+  assert.equal(s.state, "unbilled");
+  // 送付OKにした請求書は片付けられない
+  const r = await createDrafts("2026-11-01", [bItem(bC3)]);
+  await choose(r.invoices[0], "post");
+  await sendOk(r.invoices[0]);
+  await rejects(`select public.invoice_discard_draft($1)`, [r.invoices[0]], /番号の付いていない下書きだけ/);
+});
+
+// =====================================================================
+// 請求の入力（設計 v1.0）：1回の入力 = 1枚の請求書
+// =====================================================================
+
+const billHead = (extra = {}) => ({
+  company_id: companyId,
+  issue_date: "2026-11-30",
+  accounting_month: "2026-11-15",
+  payment_due_date: "2026-12-31",
+  staff_name: "根元",
+  send_method: "post",
+  ...extra,
+});
+const saveBill = (id, version, head, lines) =>
+  one(`select public.bill_save($1, $2, $3::jsonb, $4::jsonb) as id`,
+      [id, version, JSON.stringify(head), JSON.stringify(lines)]);
+const billLines = (id) => all(`select * from public.bill_lines where bill_id = $1 order by sort`, [id]);
+let billId;
+
+await test("請求の入力：明細を何行でも保存でき、金額は単価×個数、並びは入力どおり", async () => {
+  billId = (await saveBill(null, null, billHead(), [
+    { description: "2名：在留サポートサービス費用（5回目/全24回）", unit_price: 38000, quantity: 2, note: "11月分" },
+    { description: "通訳の交通費", unit_price: 1240, quantity: 1, taxable: false },
+    { description: "日本語レベル費用", unit_price: 5000, quantity: 3 },
+  ])).id;
+  const b = await one(`select * from public.bills where id = $1`, [billId]);
+  assert.equal(b.status, "draft");
+  assert.equal(b.invoice_no, null);
+  assert.equal((await one(`select accounting_month::text as m from public.bills where id = $1`, [billId])).m, "2026-11-01");   // 計上月は月の1日にそろう
+  assert.equal(b.created_by, U1);
+  const ls = await billLines(billId);
+  assert.deepEqual(ls.map((l) => l.amount), [76000, 1240, 15000]);
+  assert.deepEqual(ls.map((l) => l.taxable), [true, false, true]);
+  assert.equal(ls[0].note, "11月分");
+});
+
+await test("請求の入力：入力中は何度でも直せ、明細は入れ替わる。版が上がる", async () => {
+  const before = await one(`select version from public.bills where id = $1`, [billId]);
+  await saveBill(billId, before.version, billHead({ memo: "確認中" }), [
+    { description: "2名：在留サポートサービス費用（5回目/全24回）", unit_price: 38000, quantity: 2 },
+  ]);
+  const b = await one(`select * from public.bills where id = $1`, [billId]);
+  assert.equal(b.version, before.version + 1);
+  assert.equal(b.memo, "確認中");
+  assert.equal((await billLines(billId)).length, 1);
+});
+
+await test("請求の入力：古い画面からの保存は、ほかの人の更新を上書きしない", async () => {
+  await rejects(`select public.bill_save($1, 1, $2::jsonb, $3::jsonb)`,
+    [billId, JSON.stringify(billHead()), JSON.stringify([{ description: "x", unit_price: 1, quantity: 1 }])],
+    /先に更新しました/);
+});
+
+await test("請求の入力：明細が0行・内訳が空なら保存できず、何も残らない", async () => {
+  const n0 = (await one(`select count(*)::int as n from public.bills`)).n;
+  await rejects(`select public.bill_save(null, null, $1::jsonb, '[]'::jsonb)`, [JSON.stringify(billHead())], /1行以上/);
+  await rejects(`select public.bill_save(null, null, $1::jsonb, $2::jsonb)`,
+    [JSON.stringify(billHead()), JSON.stringify([{ description: "  ", unit_price: 1, quantity: 1 }])], /check/i);
+  assert.equal((await one(`select count(*)::int as n from public.bills`)).n, n0);
+});
+
+await test("請求の入力：見るだけの人は保存も削除もできない", async () => {
+  await as(U2);
+  await rejects(`select public.bill_save(null, null, $1::jsonb, $2::jsonb)`,
+    [JSON.stringify(billHead()), JSON.stringify([{ description: "x", unit_price: 1, quantity: 1 }])], /管理者だけ/);
+  await rejects(`select public.bill_delete_draft($1)`, [billId], /管理者だけ/);
+  await as(U1);
+});
+
+await test("請求の入力：番号や「請求書あり」は直接は付けられない", async () => {
+  await rejects(`update public.bills set invoice_no = '2711-01', status = 'issued', issued_at = now() where id = $1`,
+    [billId], /請求書を作る」ボタン/);
+  await rejects(`insert into public.bills (company_id, issue_date, accounting_month, payment_due_date, status, invoice_no, issued_at)
+                 values ($1, '2026-11-30', '2026-11-01', '2026-12-31', 'issued', '2711-99', now())`, [companyId], /入力中」から/);
+});
+
+await test("請求の入力：請求書を作ったあとは、直すことも消すこともできない", async () => {
+  const id = (await saveBill(null, null, billHead(), [{ description: "固定のテスト", unit_price: 1000, quantity: 1 }])).id;
+  // 「請求書を作る」の処理（次の回で作る）の代わりに、鍵を開けて番号を付ける
+  await db.exec(`select set_config('app.bill_unlock', 'on', false)`);
+  await db.query(`update public.bills set status = 'issued', invoice_no = '2711-90', issued_at = now() where id = $1`, [id]);
+  await db.exec(`select set_config('app.bill_unlock', '', false)`);
+  const v = (await one(`select version from public.bills where id = $1`, [id])).version;
+  await rejects(`select public.bill_save($1, $2, $3::jsonb, $4::jsonb)`,
+    [id, v, JSON.stringify(billHead()), JSON.stringify([{ description: "x", unit_price: 1, quantity: 1 }])], /作り直す/);
+  await rejects(`update public.bill_lines set unit_price = 1 where bill_id = $1`, [id], /作り直す/);
+  await rejects(`select public.bill_delete_draft($1)`, [id], /消せません/);
+});
+
+await test("請求の入力：入力中の請求は明細ごと消せる", async () => {
+  await db.query(`select public.bill_delete_draft($1)`, [billId]);
+  assert.equal(await one(`select id from public.bills where id = $1`, [billId]), undefined);
+  assert.equal((await billLines(billId)).length, 0);
+});
+
+await test("契約の行：回数と◯月分が残り、次の回数は「導入前の回数とアプリの最大」の大きいほう + 1", async () => {
+  // contractId：導入前に3回請求済み（base_count = 3）、全12回、旧Excelで10月分まで
+  const before = await one(`select * from public.contract_next_counts($1) where contract_id = $2`, [companyId, contractId]);
+  assert.equal(before.next_count, 4);
+  const id = (await saveBill(null, null, billHead(), [
+    { description: "2名分：在留サポートサービス：11月分（4回目/全12回）", unit_price: 38000, quantity: 2,
+      contract_id: contractId, count_no: 4, service_month: "2026-11-01" },
+    { description: "通訳の交通費", unit_price: 1240, quantity: 1, taxable: false, count_no: 9 },
+  ])).id;
+  const ls = await billLines(id);
+  assert.equal(ls[0].contract_id, contractId);
+  assert.equal(ls[0].count_no, 4);
+  assert.equal(ls[1].contract_id, null);
+  assert.equal(ls[1].count_no, null);   // 契約のない行に回数は残さない
+  const after = await one(`select next_count, last_count, last_service_month::text as m from public.contract_next_counts($1) where contract_id = $2`, [companyId, contractId]);
+  assert.deepEqual([after.next_count, after.last_count, after.m], [5, 4, "2026-11-01"]);
+  await db.query(`select public.bill_delete_draft($1)`, [id]);
+});
+
+await test("契約の行：ほかの企業の契約にはつなげられない", async () => {
+  const otherContract = (await one(`insert into public.contracts (company_id, name, quantity, unit_price) values ($1, '別会社の契約', 1, 1000) returning id`, [emailCompanyId])).id;
+  await rejects(`select public.bill_save(null, null, $1::jsonb, $2::jsonb)`,
+    [JSON.stringify(billHead()), JSON.stringify([{ description: "x", unit_price: 1, quantity: 1, contract_id: otherContract }])],
+    /選んだ企業の契約ではありません/);
+});
+
+await test("請求済み：送った日がないと「請求済み」にできず、請求済みの請求は直せない・消せない", async () => {
+  const id = (await saveBill(null, null, billHead(), [{ description: "送付のテスト", unit_price: 1000, quantity: 1 }])).id;
+  await db.exec(`select set_config('app.bill_unlock', 'on', false)`);
+  await db.query(`update public.bills set status = 'issued', invoice_no = '2711-91', issued_at = now() where id = $1`, [id]);
+  await rejects(`update public.bills set status = 'sent' where id = $1`, [id], /check/i);
+  await db.query(`update public.bills set status = 'sent', sent_on = '2026-11-30', sent_at = now() where id = $1`, [id]);
+  await db.exec(`select set_config('app.bill_unlock', '', false)`);
+  await rejects(`update public.bills set memo = 'x' where id = $1`, [id], /作り直す/);
+  await rejects(`update public.bill_lines set note = 'x' where bill_id = $1`, [id], /作り直す/);
+  await rejects(`select public.bill_delete_draft($1)`, [id], /消せません/);
+});
+
 console.log(`\n${passed} 件成功${process.exitCode ? "（失敗あり）" : ""}`);
