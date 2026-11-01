@@ -23,6 +23,7 @@ export type BillForExcel = {
   payment_due_date: string;
   staff_name: string | null;
   invoice_no: string | null;
+  invoice_total: number; // 請求書の合計（税込）。消費税は請求書全体で1回だけ端数処理したもの
   lines: { description: string; unit_price: number; quantity: number; amount: number; taxable: boolean; note: string | null }[];
 };
 
@@ -80,7 +81,7 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
       { col: "O", label: "入金確認" },
       { col: "P", label: "入金金額" },
     ],
-    rows: bill.lines.map((l) => [
+    rows: bill.lines.map((l, i) => [
       bill.staff_name,
       bill.company_name,
       pendingNo,
@@ -88,13 +89,13 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
       "-",
       l.quantity,
       l.amount,
-      null,
+      i === 0 ? bill.invoice_total : null,
       bill.payment_due_date,
       null,
       null,
     ]),
     notes: [
-      "H 税込は空けておきます（消費税は請求書全体で1回だけ計算するので、行ごとの税込は書かない。11/01 ひろみ決定）",
+      "H 税込は、請求書の合計（税込）を1行目にだけ入れます。2行目からは空けておきます（入金額と見比べやすくするため。行ごとの ×1.1 は書かない）",
       "I〜M列（掲載原価など）は空けたままです",
       "O 入金確認・P 入金金額は空けておきます（ひろみさんが売掛を確かめて記入）",
     ],
@@ -110,23 +111,26 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
       { col: "", label: "社名" },
       { col: "", label: "内訳" },
       { col: "", label: "受注金額" },
+      { col: "", label: "請求金額（税込）" },
       { col: "", label: "入金予定" },
       { col: "", label: "入金日" },
       { col: "", label: "入金金額" },
     ],
-    rows: bill.lines.map((l) => [
+    rows: bill.lines.map((l, i) => [
       String(year),
       `${m}月`,
       bill.company_name,
       l.description,
       l.amount,
+      i === 0 ? bill.invoice_total : null,
       bill.payment_due_date,
       null,
       null,
     ]),
     notes: [
+      "請求金額（税込）は、請求書の合計を1行目にだけ入れます（明細が何行あっても、入金額と1対1で見比べられるように）",
       "入金日・入金金額は空けておきます（ひろみさんが記入）",
-      `${m}月の合計は、月ごとの一覧（収支一覧表）に式で出ます`,
+      `${m}月の合計は、月ごとの一覧（収支一覧表）に、請求金額（税込）を足す式で出ます`,
     ],
   };
 

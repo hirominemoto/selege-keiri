@@ -51,6 +51,7 @@ export default async function BillPage({
       payment_due_date: bill.payment_due_date,
       staff_name: bill.staff_name,
       invoice_no: bill.invoice_no,
+      invoice_total: totals.total,
       lines: lines.map((l) => ({ ...l, quantity: Number(l.quantity), note: l.note ?? null })),
     },
     sheetRow?.sheet_name ?? null,
