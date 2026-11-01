@@ -3,6 +3,8 @@ import type { AppEntry, ContractState } from "@/lib/bills";
 import type { CompanyOption } from "@/components/BillForm";
 import type { PreviousBill } from "@/components/CompanyBillingPanel";
 import { createClient } from "@/lib/supabase/server";
+import { buildHistory, type BillIn, type HistoryEntry, type SheetRowIn } from "@/lib/history";
+import { currentMonthJst } from "@/lib/dates";
 
 type BillRow = {
   id: string;
@@ -112,6 +114,48 @@ export async function loadTaxSettings(): Promise<{ taxRate: number; taxRounding:
   };
 }
 
+/** 企業ごとの請求の履歴（companyId を渡すとその企業だけ）。contracts は呼ぶ側で読んだものを渡す */
+export async function loadHistory(contracts: ContractState[], companyId?: string): Promise<Record<string, HistoryEntry[]>> {
+  const supabase = await createClient();
+  // 企業シートの行は数百行。Supabase は1回に1000行までなので、分けて読む
+  const sheetRows: SheetRowIn[] = [];
+  for (let from = 0; ; from += 1000) {
+    let q = supabase
+      .from("legacy_sheet_rows")
+      .select("company_id, issue_date, accounting_month, description, amount, row_no, sheet_name")
+      .order("issue_date")
+      .order("sheet_name")
+      .order("row_no")
+      .range(from, from + 999);
+    if (companyId) q = q.eq("company_id", companyId);
+    const { data } = await q;
+    sheetRows.push(...((data ?? []) as SheetRowIn[]));
+    if (!data || data.length < 1000) break;
+  }
+  // アプリの請求も、件数が増えても全部読めるように分けて読む
+  const bills: BillIn[] = [];
+  for (let from = 0; ; from += 1000) {
+    let bq = supabase
+      .from("bills")
+      .select("id, company_id, issue_date, accounting_month, status, invoice_no, bill_lines(description, amount, sort)")
+      .order("issue_date", { ascending: false })
+      .order("id")
+      .range(from, from + 999);
+    if (companyId) bq = bq.eq("company_id", companyId);
+    const { data } = await bq;
+    bills.push(...((data ?? []) as BillIn[]));
+    if (!data || data.length < 1000) break;
+  }
+  const { data: setting } = await supabase.from("app_settings").select("value").eq("key", "legacy_billed_until").maybeSingle();
+  return buildHistory({
+    sheetRows,
+    bills,
+    contracts,
+    billedUntil: typeof setting?.value === "string" ? setting.value : "2026-10-31",
+    currentMonth: currentMonthJst(),
+  });
+}
+
 /** 入力フォームに必要なもの：企業の一覧、企業ごとの契約と回数、前回の請求、税率 */
 export async function loadBillFormData(excludeBillId?: string) {
   const supabase = await createClient();
@@ -127,9 +171,11 @@ export async function loadBillFormData(excludeBillId?: string) {
   ]);
   const contractsByCompany: Record<string, ContractState[]> = {};
   for (const c of contracts) (contractsByCompany[c.company_id] ??= []).push(c);
+  const history = await loadHistory(contracts);
   return {
     companies: (companyData ?? []) as CompanyOption[],
     contractsByCompany,
+    history,
     previous,
     ...tax,
   };

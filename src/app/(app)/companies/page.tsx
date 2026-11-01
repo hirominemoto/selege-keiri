@@ -44,9 +44,14 @@ export default async function CompaniesPage({ searchParams }: { searchParams: Pr
           <p className="lead">取引先の宛名と、契約ごとの金額・回数</p>
         </div>
         {user.role === "admin" && (
-          <Link href="/companies/new" className="btn">
-            ＋ 企業を登録
-          </Link>
+          <div className="month-nav">
+            <Link href="/companies/import-sheet" className="btn btn-secondary">
+              企業シートの取り込み
+            </Link>
+            <Link href="/companies/new" className="btn">
+              ＋ 企業を登録
+            </Link>
+          </div>
         )}
       </div>
 

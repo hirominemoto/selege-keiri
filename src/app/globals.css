@@ -941,3 +941,46 @@ tr.row-done td {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* 請求の履歴（企業ごと・計上月ごと） */
+.nowrap {
+  white-space: nowrap;
+}
+.btn-small {
+  padding: 4px 12px;
+  font-size: 13px;
+  min-height: 0;
+}
+.history-lines {
+  margin: 0;
+  padding-left: 1.1em;
+}
+.history-lines li {
+  margin: 0;
+}
+.history-table tr.is-unbilled td {
+  background: #fffaf0;
+}
+.status-badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.status-badge.is-billed {
+  color: #2f6b4f;
+}
+.status-badge.is-unbilled {
+  color: #a35a00;
+}
+.history-older {
+  margin-top: 10px;
+}
+.history-older summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 8px;
+}

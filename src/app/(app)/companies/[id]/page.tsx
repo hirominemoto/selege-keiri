@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { CompanyBillingPanel } from "@/components/CompanyBillingPanel";
 import { monthName } from "@/lib/contract";
-import { loadContractStates, loadPreviousBills, loadTaxSettings } from "@/app/(app)/bills/formData";
+import { loadContractStates, loadHistory, loadPreviousBills, loadTaxSettings } from "@/app/(app)/bills/formData";
+import { CompanyHistory } from "@/components/CompanyHistory";
 import { currentMonthJst } from "@/lib/dates";
 import {
   contractKindLabel,
@@ -67,8 +68,15 @@ function changedFields(a: AuditRow): string {
   return keys.length ? keys.map((k) => fieldLabels[k] ?? k).join("・") + "を変更" : "変更";
 }
 
-export default async function CompanyPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CompanyPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ history?: string }>;
+}) {
   const { id } = await params;
+  const showAll = (await searchParams).history === "all";
   const user = await requireUser();
   const supabase = await createClient();
 
@@ -84,6 +92,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
     loadTaxSettings(),
   ]);
   const contracts = (contractData ?? []) as Contract[];
+  const history = (await loadHistory(states, id))[id] ?? [];
   // 契約ごとの、次に請求する回数（アプリ導入前の回数とアプリの最大の大きいほう + 1）
   const nextCountOf = new Map(states.map((s) => [s.id, s.next_count]));
 
@@ -152,8 +161,13 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
           taxRounding={tax.taxRounding}
         />
         <p className="small" style={{ marginTop: 8 }}>
-          <Link href={`/bills?company=${id}`}>この企業の請求をすべて見る</Link>
+          <Link href={`/companies/${id}?history=all#history`}>この企業の請求をすべて見る</Link>
         </p>
+      </section>
+
+      <section className="card" id="history">
+        <h2>請求の履歴</h2>
+        <CompanyHistory entries={history} companyId={id} mode="page" showAll={showAll} />
       </section>
 
       <section className="card">
