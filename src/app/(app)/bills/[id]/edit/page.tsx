@@ -15,7 +15,7 @@ export default async function EditBillPage({ params }: { params: Promise<{ id: s
   const [{ data: bill }, { data: lines }, data] = await Promise.all([
     supabase.from("bills").select("*").eq("id", id).maybeSingle(),
     supabase.from("bill_lines").select("*").eq("bill_id", id).order("sort"),
-    loadBillFormData(id),
+    loadBillFormData(),
   ]);
   if (!bill) notFound();
   if (bill.status !== "draft") redirect(`/bills/${id}`);
