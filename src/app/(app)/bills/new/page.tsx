@@ -22,7 +22,7 @@ export default async function NewBillPage({ searchParams }: { searchParams: Prom
           <p className="lead">1回の入力が、1枚の請求書になります。保存したあとも、請求書を作るまでは何度でも直せます。</p>
         </div>
       </div>
-      <BillForm {...data} initialCompanyId={company} defaultStaff={user.displayName ?? ""} today={todayJst()} />
+      <BillForm {...data} initialCompanyId={company} today={todayJst()} />
     </main>
   );
 }

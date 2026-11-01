@@ -7,6 +7,8 @@ import { billStatusText, type Bill, type BillLine } from "@/lib/bills";
 import { dateLabel, dateTimeLabel, monthLabel, sendMethodLabel, yen } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { deleteBill } from "../actions";
+import { ExcelRowsPreview } from "@/components/ExcelRowsPreview";
+import { excelRowsForBill } from "@/lib/excelRows";
 
 export default async function BillPage({
   params,
@@ -34,6 +36,26 @@ export default async function BillPage({
   const totals = invoiceTotals(lines, taxRate, (settings.get("tax_rounding") ?? "ceil") as TaxRounding);
   const hasNontaxable = totals.nontaxable !== 0;
   const isDraft = bill.status === "draft";
+  const { data: sheetRow } = await supabase
+    .from("legacy_sheet_rows")
+    .select("sheet_name")
+    .eq("company_id", bill.company_id)
+    .order("issue_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const excelBooks = excelRowsForBill(
+    {
+      company_name: bill.companies?.name ?? "",
+      issue_date: bill.issue_date,
+      accounting_month: bill.accounting_month,
+      payment_due_date: bill.payment_due_date,
+      staff_name: bill.staff_name,
+      invoice_no: bill.invoice_no,
+      invoice_total: totals.total,
+      lines: lines.map((l) => ({ ...l, quantity: Number(l.quantity), note: l.note ?? null })),
+    },
+    sheetRow?.sheet_name ?? null,
+  );
 
   return (
     <main className="page">
@@ -106,6 +128,14 @@ export default async function BillPage({
             <dd>{yen(totals.total)}</dd>
           </div>
         </dl>
+      </div>
+
+      <div className="card">
+        <h2>Excelにはこう書かれます</h2>
+        <p className="small muted">
+          この請求を入力すると、3つのExcelにこの行が足されます（見本です。Excelへの書き込みはまだ作っていません）。
+        </p>
+        <ExcelRowsPreview books={excelBooks} />
       </div>
 
       <div className="card">

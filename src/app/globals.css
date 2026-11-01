@@ -984,3 +984,27 @@ tr.row-done td {
   font-weight: 600;
   margin-bottom: 8px;
 }
+
+/* Excelに書かれる行の見本 */
+.excel-book + .excel-book {
+  margin-top: 20px;
+}
+.excel-book h3 {
+  font-size: 15px;
+  margin: 0 0 4px;
+}
+.excel-table th,
+.excel-table td {
+  font-size: 13px;
+  padding: 6px 8px;
+}
+.excel-col {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--accent);
+  margin-right: 4px;
+}
+.excel-notes {
+  margin: 6px 0 0;
+  padding-left: 1.2em;
+}

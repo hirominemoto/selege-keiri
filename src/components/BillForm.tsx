@@ -23,6 +23,9 @@ import { CompanyHistory } from "@/components/CompanyHistory";
 import type { HistoryEntry } from "@/lib/history";
 import { monthLabel, yen } from "@/lib/format";
 
+/** 売上表 A列「担当」に入れる言葉（11/01 ひろみ決定：社長が入れたかどうかだけ残す） */
+export const STAFF_CHOICES = ["社長", "担当"];
+
 export type CompanyOption = {
   id: string;
   name: string;
@@ -58,7 +61,6 @@ export function BillForm(props: {
   initialCompanyId?: string; // 企業のページから来たとき
   taxRate: number;
   taxRounding: TaxRounding;
-  defaultStaff: string;
   today: string;
   bill?: Bill;
   lines?: BillLine[];
@@ -312,8 +314,16 @@ export function BillForm(props: {
               </label>
             </div>
           </Field>
-          <Field label="担当" name="staff_name" hint="売上表のA列「担当」に入ります">
-            <input id="staff_name" name="staff_name" type="text" defaultValue={b ? (b.staff_name ?? "") : props.defaultStaff} />
+          <Field label="入力した人" name="staff_name" required error={e.staff_name} hint="売上表のA列「担当」に入ります。社長以外の人が入れたときは「担当」">
+            <select id="staff_name" name="staff_name" defaultValue={b?.staff_name ?? ""}>
+              <option value="">選んでください</option>
+              {STAFF_CHOICES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+              {b?.staff_name && !STAFF_CHOICES.includes(b.staff_name) && <option value={b.staff_name}>{b.staff_name}（以前の入力）</option>}
+            </select>
           </Field>
         </div>
       </div>
