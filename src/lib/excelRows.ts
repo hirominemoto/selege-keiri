@@ -27,15 +27,11 @@ export type BillForExcel = {
 };
 
 const monthNo = (d: string) => Number(d.slice(5, 7));
-/**
- * 税込（今の式 =G×1.1 をそのまま再現する。丸めない）。消費税のかからない行は金額のまま
- * 請求書の消費税は請求書全体でまとめて端数処理するので、10円単位でない行は請求書と少しずれることがある
- */
-const withTax = (amount: number, taxable: boolean) => (taxable ? (amount * 11) / 10 : amount);
 
 export function excelRowsForBill(bill: BillForExcel, companySheetName: string | null): ExcelRows[] {
   const m = monthNo(bill.accounting_month);
   const year = Number(bill.accounting_month.slice(0, 4));
+  const fiscalYear = m >= 8 ? year + 1 : year; // 7月決算：2026年8月〜2027年7月が2027年度
   const pendingNo = bill.invoice_no ?? "（請求書を作ると入ります）";
 
   const companySheet: ExcelRows = {
@@ -70,7 +66,7 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
   const salesSheet: ExcelRows = {
     book: "売上表",
     sheet: `${m}月`,
-    sheetNote: `${year}年${m}月計上の月別シート（73行目からの表）に足します`,
+    sheetNote: `売上表（${fiscalYear}年度）のブックの「${m}月」シート（73行目からの表）に足します`,
     columns: [
       { col: "A", label: "担当" },
       { col: "B", label: "社名" },
@@ -92,13 +88,13 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
       "-",
       l.quantity,
       l.amount,
-      withTax(l.amount, l.taxable),
+      null,
       bill.payment_due_date,
       null,
       null,
     ]),
     notes: [
-      "H 税込は、今までどおり式（=G×1.1）で入れます。消費税のかからない行は金額のまま",
+      "H 税込は空けておきます（消費税は請求書全体で1回だけ計算するので、行ごとの税込は書かない。11/01 ひろみ決定）",
       "I〜M列（掲載原価など）は空けたままです",
       "O 入金確認・P 入金金額は空けておきます（ひろみさんが売掛を確かめて記入）",
     ],
@@ -114,7 +110,6 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
       { col: "", label: "社名" },
       { col: "", label: "内訳" },
       { col: "", label: "受注金額" },
-      { col: "", label: "税込金額" },
       { col: "", label: "入金予定" },
       { col: "", label: "入金日" },
       { col: "", label: "入金金額" },
@@ -125,14 +120,12 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
       bill.company_name,
       l.description,
       l.amount,
-      withTax(l.amount, l.taxable),
       bill.payment_due_date,
       null,
       null,
     ]),
     notes: [
       "入金日・入金金額は空けておきます（ひろみさんが記入）",
-      "税込金額も =受注金額×1.1 の式で入れます（10円単位でない行は小数が出て、請求書の消費税と少しずれることがあります）",
       `${m}月の合計は、月ごとの一覧（収支一覧表）に式で出ます`,
     ],
   };
