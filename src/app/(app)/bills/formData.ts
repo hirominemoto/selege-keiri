@@ -124,6 +124,7 @@ export async function loadHistory(contracts: ContractState[], companyId?: string
       .from("legacy_sheet_rows")
       .select("company_id, issue_date, accounting_month, description, amount, row_no, sheet_name")
       .order("issue_date")
+      .order("sheet_name")
       .order("row_no")
       .range(from, from + 999);
     if (companyId) q = q.eq("company_id", companyId);
@@ -131,19 +132,24 @@ export async function loadHistory(contracts: ContractState[], companyId?: string
     sheetRows.push(...((data ?? []) as SheetRowIn[]));
     if (!data || data.length < 1000) break;
   }
-  let bq = supabase
-    .from("bills")
-    .select("id, company_id, issue_date, accounting_month, status, invoice_no, bill_lines(description, amount, sort)")
-    .order("issue_date", { ascending: false })
-    .limit(2000);
-  if (companyId) bq = bq.eq("company_id", companyId);
-  const [{ data: bills }, { data: setting }] = await Promise.all([
-    bq,
-    supabase.from("app_settings").select("value").eq("key", "legacy_billed_until").maybeSingle(),
-  ]);
+  // アプリの請求も、件数が増えても全部読めるように分けて読む
+  const bills: BillIn[] = [];
+  for (let from = 0; ; from += 1000) {
+    let bq = supabase
+      .from("bills")
+      .select("id, company_id, issue_date, accounting_month, status, invoice_no, bill_lines(description, amount, sort)")
+      .order("issue_date", { ascending: false })
+      .order("id")
+      .range(from, from + 999);
+    if (companyId) bq = bq.eq("company_id", companyId);
+    const { data } = await bq;
+    bills.push(...((data ?? []) as BillIn[]));
+    if (!data || data.length < 1000) break;
+  }
+  const { data: setting } = await supabase.from("app_settings").select("value").eq("key", "legacy_billed_until").maybeSingle();
   return buildHistory({
     sheetRows,
-    bills: (bills ?? []) as BillIn[],
+    bills,
     contracts,
     billedUntil: typeof setting?.value === "string" ? setting.value : "2026-10-31",
     currentMonth: currentMonthJst(),
