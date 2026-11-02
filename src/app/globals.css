@@ -717,6 +717,9 @@ tr.row-done td {
   font-size: 7.5pt;
   line-height: 1.35;
   white-space: pre-line; /* 入力で改行したところで改行する */
+  /* 自動の折り返しは、空白（全角スペースなど）のところで。言葉の途中では折らない。
+     空白がなくて欄に収まらないときだけ、どこでも折る */
+  word-break: keep-all;
   overflow-wrap: anywhere;
 }
 /* 内訳を入れるところ・請求の画面の明細も、入力どおりに改行して見せる */
