@@ -102,7 +102,7 @@ export default async function BillPage({
             <tbody>
               {lines.map((l) => (
                 <tr key={l.id}>
-                  <td>
+                  <td className="bill-desc">
                     {l.description}
                     {!l.taxable && <span className="badge" style={{ marginLeft: 6 }}>消費税なし</span>}
                   </td>

@@ -716,6 +716,12 @@ tr.row-done td {
 .inv-lines td.c-desc {
   font-size: 7.5pt;
   line-height: 1.35;
+  white-space: pre-line; /* 入力で改行したところで改行する */
+  overflow-wrap: anywhere;
+}
+/* 内訳を入れるところ・請求の画面の明細も、入力どおりに改行して見せる */
+.bill-desc {
+  white-space: pre-line;
 }
 .inv-lines .c-qty {
   width: 19.5mm;

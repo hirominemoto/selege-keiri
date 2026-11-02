@@ -365,10 +365,15 @@ export function BillForm(props: {
                   </button>
                 </span>
               </div>
-              <Field label="内訳（案件名）" name={`d-${l.key}`} error={e[`line-${i}-description`]}>
-                <input
+              <Field
+                label="内訳（案件名）"
+                name={`d-${l.key}`}
+                error={e[`line-${i}-description`]}
+                hint="Enterで改行できます。改行は請求書の上だけで、Excelには1行で書かれます"
+              >
+                <textarea
                   id={`d-${l.key}`}
-                  type="text"
+                  rows={2}
                   value={l.description}
                   placeholder="例：2名：在留サポートサービス費用（5回目/全24回）"
                   onChange={(ev) => update(l.key, { description: ev.target.value })}
