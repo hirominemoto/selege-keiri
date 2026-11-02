@@ -643,6 +643,7 @@ tr.row-done td {
   width: 23mm;
   height: 23mm;
   object-fit: contain;
+  mix-blend-mode: multiply; /* 本物の押印のように、下の文字が透けて見える */
 }
 .inv-seal-empty {
   border: 1.5px dashed rgba(179, 38, 30, 0.6);
