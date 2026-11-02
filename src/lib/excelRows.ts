@@ -53,7 +53,7 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
     rows: bill.lines.map((l) => [
       bill.issue_date,
       `${bill.company_name}（${m}月）`,
-      l.description,
+      oneLine(l.description),
       l.unit_price,
       l.quantity,
       l.amount,
@@ -85,7 +85,7 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
       bill.staff_name,
       bill.company_name,
       pendingNo,
-      l.description,
+      oneLine(l.description),
       "-",
       l.quantity,
       l.amount,
@@ -120,7 +120,7 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
       String(year),
       `${m}月`,
       bill.company_name,
-      l.description,
+      oneLine(l.description),
       l.amount,
       i === 0 ? bill.invoice_total : null,
       bill.payment_due_date,
@@ -135,4 +135,9 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
   };
 
   return [companySheet, salesSheet, ledger];
+}
+
+/** 内訳の改行は請求書の上だけのもの。Excelには1行にして書く */
+function oneLine(s: string): string {
+  return s.replace(/\s*\r?\n\s*/g, "");
 }
