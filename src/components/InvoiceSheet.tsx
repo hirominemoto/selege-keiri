@@ -19,6 +19,8 @@ type Props = {
   taxRate: number;
   taxRounding: TaxRounding;
   isDraft: boolean;
+  /** 番号がまだないときに番号の欄に出す言葉 */
+  noPlaceholder?: string;
   /** 送付OK以降は、送付OKで固まった金額をそのまま出す（いまの税の設定で計算し直さない） */
   frozenTotals?: Totals;
 };
@@ -190,7 +192,7 @@ export function InvoiceSheet(p: Props) {
         <div className="inv-no">
           <span>No</span>
           <span className="inv-no-box">
-            {p.invoiceNo ?? <span className="invoice-pending">送付OKで付きます</span>}
+            {p.invoiceNo ?? <span className="invoice-pending">{p.noPlaceholder ?? "送付OKで付きます"}</span>}
           </span>
         </div>
       </div>

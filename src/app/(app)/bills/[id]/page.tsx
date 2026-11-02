@@ -2,11 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ConfirmButton } from "@/components/InvoiceDraftForms";
 import { requireUser } from "@/lib/auth";
-import { invoiceTotals, type TaxRounding } from "@/lib/billing";
-import { billStatusText, type Bill, type BillLine } from "@/lib/bills";
+import type { TaxRounding } from "@/lib/billing";
+import { billStatusText, billTotals, todayJst, type Bill, type BillLine } from "@/lib/bills";
 import { dateLabel, dateTimeLabel, monthLabel, sendMethodLabel, yen } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
-import { deleteBill } from "../actions";
+import { deleteBill, issueBill, markBillSent } from "../actions";
 import { ExcelRowsPreview } from "@/components/ExcelRowsPreview";
 import { excelRowsForBill } from "@/lib/excelRows";
 
@@ -15,10 +15,10 @@ export default async function BillPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ saved?: string }>;
+  searchParams: Promise<{ saved?: string; sent?: string; error?: string }>;
 }) {
   const { id } = await params;
-  const { saved } = await searchParams;
+  const { saved, sent, error } = await searchParams;
   const user = await requireUser();
   const canEdit = user.role === "admin";
   const supabase = await createClient();
@@ -32,8 +32,13 @@ export default async function BillPage({
   const bill = billData as Bill & { companies: { name: string } | null };
   const lines = (lineData ?? []) as BillLine[];
   const settings = new Map((settingData ?? []).map((s) => [s.key as string, s.value]));
-  const taxRate = Number(settings.get("tax_rate") ?? 0.1);
-  const totals = invoiceTotals(lines, taxRate, (settings.get("tax_rounding") ?? "ceil") as TaxRounding);
+  // 請求書を作ったあとは、作ったときの税率（いまの設定が変わっても請求書と合わせる）
+  const taxRate =
+    billData.tax_rate !== null && billData.tax_rate !== undefined
+      ? Number(billData.tax_rate)
+      : Number(settings.get("tax_rate") ?? 0.1);
+  // 請求書を作ったあとは、作ったときに固まった金額を出す
+  const totals = billTotals(bill, lines, taxRate, (settings.get("tax_rounding") ?? "ceil") as TaxRounding);
   const hasNontaxable = totals.nontaxable !== 0;
   const isDraft = bill.status === "draft";
   const { data: sheetRow } = await supabase
@@ -78,6 +83,8 @@ export default async function BillPage({
       </div>
 
       {saved && <p className="notice notice-info">保存しました。</p>}
+      {sent && <p className="notice notice-info">請求済みにしました。</p>}
+      {error && <p className="notice notice-error">{error}</p>}
 
       <div className="card">
         <h2>明細</h2>
@@ -158,13 +165,84 @@ export default async function BillPage({
         </dl>
       </div>
 
+      <div className="card">
+        <h2>請求書</h2>
+        {isDraft && (
+          <>
+            <p className="muted">
+              まだアプリに入力しただけです。「請求書を見る（下書き）」で見え方を確かめてから、「請求書を作る」を押してください。
+              押すと番号が付いて、金額が固まります（そのあとはここでは直せません）。
+            </p>
+            <div className="form-actions">
+              <Link href={`/bills/${bill.id}/invoice`} className="btn btn-secondary">
+                請求書を見る（下書き）
+              </Link>
+              {canEdit && lines.length > 8 && (
+                <p className="notice notice-warn">
+                  明細が{lines.length}行あります。請求書は8行までなので、このままでは作れません。「直す」で9行目からを別の請求に分けてください。
+                </p>
+              )}
+              {canEdit && lines.length <= 8 && (
+                <form action={issueBill}>
+                  <input type="hidden" name="id" value={bill.id} />
+                  <input type="hidden" name="version" value={bill.version} />
+                  <ConfirmButton
+                    message={`${bill.companies?.name ?? ""} の請求書を作ります（合計 ${yen(totals.total)}）。番号が付き、このあとは直せなくなります。よろしいですか？`}
+                    className="btn"
+                  >
+                    請求書を作る
+                  </ConfirmButton>
+                </form>
+              )}
+            </div>
+          </>
+        )}
+        {!isDraft && (
+          <>
+            <p className="muted">
+              №{bill.invoice_no}　作った日時 {dateTimeLabel(bill.issued_at)}
+            </p>
+            <div className="form-actions">
+              <Link href={`/bills/${bill.id}/invoice`} className="btn btn-secondary">
+                請求書を開く（印刷・PDF）
+              </Link>
+            </div>
+          </>
+        )}
+        {bill.status === "issued" && canEdit && (
+          <form action={markBillSent} className="form" style={{ marginTop: 16 }}>
+            <input type="hidden" name="id" value={bill.id} />
+            <h3>送ったら</h3>
+            <div className="form-row">
+              <label>
+                送った日
+                <input name="sent_on" type="date" defaultValue={todayJst()} required />
+              </label>
+              <fieldset className="choices">
+                <legend>送り方</legend>
+                <label className="choice">
+                  <input type="radio" name="send_method" value="post" defaultChecked={bill.send_method === "post"} />
+                  郵送
+                </label>
+                <label className="choice">
+                  <input type="radio" name="send_method" value="email" defaultChecked={bill.send_method === "email"} />
+                  メール
+                </label>
+              </fieldset>
+            </div>
+            <div className="form-actions">
+              <button type="submit" className="btn">
+                送った（請求済みにする）
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+
       {canEdit && isDraft && (
         <div className="card">
           <h2>このあと</h2>
-          <p className="muted">
-            この請求は、まだアプリに入力しただけです。「請求書を作る」（請求書作成済みにする）、「送った」（請求済みにする）、
-            「Excelに書き込む」（企業シート・売上表・収支一覧への記入）は、次の段階で作ります。
-          </p>
+          <p className="muted">「Excelに書き込む」（企業シート・売上表・収支一覧への記入）は、次の段階で作ります。</p>
           <form action={deleteBill} className="form-actions">
             <input type="hidden" name="id" value={bill.id} />
             <ConfirmButton message="この請求を消します。よろしいですか？（まだ請求書を作っていないので、請求書番号は使われません）" className="btn btn-danger-quiet">

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { addMonths, invoiceTotals, parseMonth, type TaxRounding } from "@/lib/billing";
-import { billStatusText, type BillStatus } from "@/lib/bills";
+import { addMonths, parseMonth, type TaxRounding } from "@/lib/billing";
+import { billStatusText, billTotals, type BillStatus } from "@/lib/bills";
 import { currentMonthJst } from "@/lib/dates";
 import { dateLabel, monthLabel, sendMethodLabel, yen } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
@@ -15,6 +15,10 @@ type Row = {
   send_method: "post" | "email";
   staff_name: string | null;
   companies: { name: string } | null;
+  subtotal_taxable: number | null;
+  subtotal_nontaxable: number | null;
+  tax_amount: number | null;
+  total: number | null;
   bill_lines: { description: string; amount: number; taxable: boolean; sort: number }[];
 };
 
@@ -31,7 +35,7 @@ export default async function BillsPage({
   // 企業のページから来たときは、その企業の請求を全部の月で出す
   let query = supabase
     .from("bills")
-    .select("id, issue_date, status, invoice_no, sent_on, send_method, staff_name, companies(name), bill_lines(description, amount, taxable, sort)");
+    .select("id, issue_date, status, invoice_no, sent_on, send_method, staff_name, subtotal_taxable, subtotal_nontaxable, tax_amount, total, companies(name), bill_lines(description, amount, taxable, sort)");
   query = company
     ? query.eq("company_id", company).order("issue_date", { ascending: false })
     : query.eq("accounting_month", m).order("issue_date");
@@ -46,7 +50,7 @@ export default async function BillsPage({
   const rows = ((data ?? []) as unknown as Row[]).map((r) => ({
     ...r,
     lines: [...r.bill_lines].sort((a, b) => a.sort - b.sort),
-    totals: invoiceTotals(r.bill_lines, taxRate, taxRounding),
+    totals: billTotals(r, r.bill_lines, taxRate, taxRounding),
   }));
   const drafts = rows.filter((r) => r.status === "draft").length;
   const sum = rows.reduce((s, r) => s + r.totals.total, 0);

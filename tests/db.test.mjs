@@ -886,6 +886,71 @@ await test("請求済み：送った日がないと「請求済み」にでき�
   await rejects(`select public.bill_delete_draft($1)`, [id], /消せません/);
 });
 
+// ---- 請求書を作る・送った（0007） ----
+const issue = async (id) => {
+  const v = (await one(`select version from public.bills where id = $1`, [id])).version;
+  return one(`select * from public.bill_issue($1, $2)`, [id, v]);
+};
+
+await test("請求書を作る：番号が付き、金額と宛名が固まる。二度押しても番号は1つ", async () => {
+  await as(U1);
+  const id = (await saveBill(null, null, billHead({ accounting_month: "2026-12-01", issue_date: "2026-12-31", payment_due_date: "2027-01-31" }), [
+    { description: "在留サポートサービス", unit_price: 38000, quantity: 2 },
+    { description: "通訳の交通費", unit_price: 1240, quantity: 1, taxable: false },
+  ])).id;
+  const b = await issue(id);
+  assert.equal(b.status, "issued");
+  assert.equal(b.invoice_no, "2712-01");   // 12月の1枚目
+  assert.equal(b.issued_by, U1);
+  assert.deepEqual([b.subtotal_taxable, b.subtotal_nontaxable, b.tax_amount, b.total], [76000, 1240, 7600, 84840]);
+  assert.equal(b.honorific, "御中");
+  assert.ok(b.bill_to_name);
+  const again = await issue(id);
+  assert.equal(again.invoice_no, "2712-01");
+  const id2 = (await saveBill(null, null, billHead({ accounting_month: "2026-12-01", issue_date: "2026-12-31", payment_due_date: "2027-01-31" }), [
+    { description: "二枚目", unit_price: 1001, quantity: 1 },
+  ])).id;
+  const b2 = await issue(id2);
+  assert.equal(b2.invoice_no, "2712-02");
+  assert.equal(b2.tax_amount, 101);   // 100.1 → 切り上げ
+});
+
+await test("請求書を作る：画面を開いたあとに直されていたら作らない。見るだけの人は作れない", async () => {
+  const id = (await saveBill(null, null, billHead(), [{ description: "版のテスト", unit_price: 1000, quantity: 1 }])).id;
+  const v = (await one(`select version from public.bills where id = $1`, [id])).version;
+  await saveBill(id, v, billHead({ memo: "直した" }), [{ description: "版のテスト", unit_price: 2000, quantity: 1 }]);
+  await rejects(`select public.bill_issue($1, $2)`, [id, v], /読み込み直して/);
+  await as(U2);
+  await rejects(`select public.bill_issue($1, $2)`, [id, v + 1], /管理者だけ/);
+  await as(U1);
+  const b = await issue(id);
+  assert.equal(b.total, 2200);
+});
+
+await test("請求書を作る：明細が9行以上あると作らない（A4 1枚・8行）", async () => {
+  const many = Array.from({ length: 9 }, (_, i) => ({ description: `行${i + 1}`, unit_price: 100, quantity: 1 }));
+  const id = (await saveBill(null, null, billHead(), many)).id;
+  const v = (await one(`select version from public.bills where id = $1`, [id])).version;
+  await rejects(`select public.bill_issue($1, $2)`, [id, v], /8行まで/);
+  assert.equal((await one(`select status from public.bills where id = $1`, [id])).status, "draft");
+});
+
+await test("送った：請求書を作る前は押せない。送った日と送り方が残り、二度押しても変わらない", async () => {
+  const id = (await saveBill(null, null, billHead(), [{ description: "送ったのテスト", unit_price: 1000, quantity: 1 }])).id;
+  await rejects(`select public.bill_mark_sent($1, '2026-11-30', 'post')`, [id], /先に「請求書を作る」/);
+  await issue(id);
+  await rejects(`select public.bill_mark_sent($1, null, 'post')`, [id], /送った日/);
+  await rejects(`select public.bill_mark_sent($1, '2026-11-30', 'fax')`, [id], /送り方/);
+  const s = await one(`select * from public.bill_mark_sent($1, '2026-11-30', 'email')`, [id]);
+  assert.equal(s.status, "sent");
+  assert.equal(s.sent_on.toISOString?.().slice(0, 10) ?? String(s.sent_on), "2026-11-30");
+  assert.equal(s.send_method, "email");
+  const again = await one(`select * from public.bill_mark_sent($1, '2026-12-05', 'post')`, [id]);
+  assert.equal(again.send_method, "email");
+  // 鍵は閉じたまま：直接は直せない
+  await rejects(`update public.bills set memo = 'x' where id = $1`, [id], /作り直す/);
+});
+
 // ---- 企業シートの取り込み（0006） ----
 await test("企業シート：取り込むと入れ替わり、計上月は請求日の月になる", async () => {
   await as(U1);
