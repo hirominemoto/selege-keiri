@@ -32,7 +32,11 @@ export default async function BillPage({
   const bill = billData as Bill & { companies: { name: string } | null };
   const lines = (lineData ?? []) as BillLine[];
   const settings = new Map((settingData ?? []).map((s) => [s.key as string, s.value]));
-  const taxRate = Number(settings.get("tax_rate") ?? 0.1);
+  // 請求書を作ったあとは、作ったときの税率（いまの設定が変わっても請求書と合わせる）
+  const taxRate =
+    billData.tax_rate !== null && billData.tax_rate !== undefined
+      ? Number(billData.tax_rate)
+      : Number(settings.get("tax_rate") ?? 0.1);
   // 請求書を作ったあとは、作ったときに固まった金額を出す
   const totals =
     billData.total !== null && billData.total !== undefined
@@ -181,7 +185,12 @@ export default async function BillPage({
               <Link href={`/bills/${bill.id}/invoice`} className="btn btn-secondary">
                 請求書を見る（下書き）
               </Link>
-              {canEdit && (
+              {canEdit && lines.length > 8 && (
+                <p className="notice notice-warn">
+                  明細が{lines.length}行あります。請求書は8行までなので、このままでは作れません。「直す」で9行目からを別の請求に分けてください。
+                </p>
+              )}
+              {canEdit && lines.length <= 8 && (
                 <form action={issueBill}>
                   <input type="hidden" name="id" value={bill.id} />
                   <input type="hidden" name="version" value={bill.version} />

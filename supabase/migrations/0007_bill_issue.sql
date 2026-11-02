@@ -65,6 +65,10 @@ begin
   if not exists (select 1 from public.bill_lines where bill_id = p_id) then
     raise exception '明細がありません';
   end if;
+  -- 請求書は A4 1枚・明細8行（今のExcelと同じ）。9行以上は印刷で切れるので作らない
+  if (select count(*) from public.bill_lines where bill_id = p_id) > 8 then
+    raise exception '請求書の明細は8行までです。9行目からは別の請求に分けてください';
+  end if;
 
   select * into co from public.companies where id = b.company_id;
   select coalesce(sum(amount) filter (where taxable), 0), coalesce(sum(amount) filter (where not taxable), 0)
