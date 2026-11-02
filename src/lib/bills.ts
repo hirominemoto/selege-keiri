@@ -65,6 +65,7 @@ export function billStatusText(b: {
     return `請求済み（${m}/${d} ${b.send_method === "email" ? "メール" : "郵送"}）`;
   }
   if (b.status === "issued") return `請求書作成済み${b.invoice_no ? `（№${b.invoice_no}）` : ""}`;
+  if (b.status === "draft" && b.invoice_no) return `アプリに入力済み（作り直し中・№${b.invoice_no}）`;
   return billStatusLabel[b.status];
 }
 

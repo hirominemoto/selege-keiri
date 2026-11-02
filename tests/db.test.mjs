@@ -951,6 +951,76 @@ await test("送った：請求書を作る前は押せない。送った日と�
   await rejects(`update public.bills set memo = 'x' where id = $1`, [id], /作り直す/);
 });
 
+// ---- 作り直す（0008） ----
+await test("作り直す：理由が要る。入力中に戻り、前の版が残り、直してもう一度作ると同じ番号", async () => {
+  await as(U1);
+  const id = (await saveBill(null, null, billHead({ accounting_month: "2027-01-01", issue_date: "2027-01-31", payment_due_date: "2027-02-28" }), [
+    { description: "作り直しのテスト", unit_price: 1000, quantity: 1 },
+  ])).id;
+  const first = await issue(id);
+  assert.equal(first.invoice_no, "2701-01");
+  await db.query(`select public.bill_mark_sent($1, '2027-01-31', 'post')`, [id]);
+  await rejects(`select public.bill_reopen($1, ' ')`, [id], /理由/);
+  const r = await one(`select * from public.bill_reopen($1, '金額の誤り')`, [id]);
+  assert.equal(r.status, "draft");
+  assert.equal(r.invoice_no, "2701-01");
+  assert.equal(r.total, null);
+  assert.equal(r.sent_on, null);
+  const revs = await all(`select revision, reason, snapshot from public.bill_revisions where bill_id = $1`, [id]);
+  assert.equal(revs.length, 1);
+  assert.equal(revs[0].reason, "金額の誤り");
+  assert.equal(revs[0].snapshot.bill.total, 1100);
+  assert.equal(revs[0].snapshot.lines.length, 1);
+  // 2回押しても前の版は1つ
+  await db.query(`select public.bill_reopen($1, 'もう一度')`, [id]);
+  assert.equal((await all(`select 1 from public.bill_revisions where bill_id = $1`, [id])).length, 1);
+  // 直してもう一度作ると、番号はそのまま・金額は新しく
+  const v = (await one(`select version from public.bills where id = $1`, [id])).version;
+  await saveBill(id, v, billHead({ accounting_month: "2027-01-01", issue_date: "2027-01-31", payment_due_date: "2027-02-28" }), [
+    { description: "作り直しのテスト", unit_price: 2000, quantity: 1 },
+  ]);
+  const again = await issue(id);
+  assert.equal(again.invoice_no, "2701-01");
+  assert.equal(again.total, 2200);
+  // 次の請求は 2701-02（作り直しで番号を使い直さない）
+  const id2 = (await saveBill(null, null, billHead({ accounting_month: "2027-01-01", issue_date: "2027-01-31", payment_due_date: "2027-02-28" }), [
+    { description: "次の請求", unit_price: 1, quantity: 1 },
+  ])).id;
+  assert.equal((await issue(id2)).invoice_no, "2701-02");
+});
+
+await test("作り直す：作り直し中の請求は消せない・企業を変えられない・番号は直接変えられない。見るだけの人は作り直せない", async () => {
+  const id = (await saveBill(null, null, billHead(), [{ description: "作り直し中のテスト", unit_price: 1000, quantity: 1 }])).id;
+  await issue(id);
+  await as(U2);
+  await rejects(`select public.bill_reopen($1, '理由')`, [id], /管理者だけ/);
+  await as(U1);
+  await db.query(`select public.bill_reopen($1, '理由')`, [id]);
+  await rejects(`select public.bill_delete_draft($1)`, [id], /作り直し中/);
+  await rejects(`update public.bills set invoice_no = '9999-99' where id = $1`, [id], /番号は直接/);
+  await rejects(`update public.bills set company_id = $2 where id = $1`, [id, emailCompanyId], /企業を変えられません/);
+});
+
+await test("作り直す：アプリと同じ authenticated の役割（RLS あり）でも作り直せる。前の版を直接は書けない", async () => {
+  await as(U1);
+  const id = (await saveBill(null, null, billHead(), [{ description: "RLS のテスト", unit_price: 1000, quantity: 1 }])).id;
+  await issue(id);
+  await db.exec(`
+    grant usage on schema public, auth to authenticated;
+    grant select, insert, update, delete on all tables in schema public to authenticated;
+    grant execute on all functions in schema public, auth to authenticated;
+    set role authenticated;
+  `);
+  try {
+    const r = await one(`select status, invoice_no from public.bill_reopen($1, 'RLS の確認')`, [id]);
+    assert.equal(r.status, "draft");
+    await rejects(`insert into public.bill_revisions (bill_id, revision, reason, snapshot) values ($1, 99, 'x', '{}')`, [id], /row-level security/);
+  } finally {
+    await db.exec(`reset role`);
+  }
+  assert.equal((await all(`select 1 from public.bill_revisions where bill_id = $1`, [id])).length, 1);
+});
+
 // ---- 企業シートの取り込み（0006） ----
 await test("企業シート：取り込むと入れ替わり、計上月は請求日の月になる", async () => {
   await as(U1);
