@@ -18,6 +18,14 @@ export type Bill = {
   invoice_no: string | null;
   issued_at: string | null;
   sent_on: string | null;
+  /** 請求書を作ったときに固まる中身（入力中は null） */
+  bill_to_name: string | null;
+  honorific: string | null;
+  subtotal_taxable: number | null;
+  subtotal_nontaxable: number | null;
+  tax_rate: number | null;
+  tax_amount: number | null;
+  total: number | null;
   version: number;
   created_at: string;
   updated_at: string;

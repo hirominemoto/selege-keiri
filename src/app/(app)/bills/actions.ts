@@ -114,3 +114,41 @@ export async function deleteBill(fd: FormData): Promise<void> {
   revalidatePath("/bills");
   redirect("/bills?deleted=1");
 }
+
+/** 「請求書を作る」：番号を付けて、金額と宛名を固める。二度押しても番号は1つ */
+export async function issueBill(fd: FormData): Promise<void> {
+  await requireAdmin();
+  const id = text(fd, "id");
+  const version = Number(text(fd, "version"));
+  if (!id) return;
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("bill_issue", { p_id: id, p_version: version });
+  if (error) {
+    const msg = error.code === "40001" || error.code === "P0001" ? error.message : dbErrorMessage(error);
+    redirect(`/bills/${id}?error=${encodeURIComponent(msg ?? "請求書を作れませんでした")}`);
+  }
+  revalidatePath("/bills");
+  revalidatePath(`/bills/${id}`);
+  redirect(`/bills/${id}/invoice?issued=1`);
+}
+
+/** 「送った」：送った日と送り方を残して、請求済みにする */
+export async function markBillSent(fd: FormData): Promise<void> {
+  await requireAdmin();
+  const id = text(fd, "id");
+  if (!id) return;
+  const sentOn = text(fd, "sent_on");
+  const method = text(fd, "send_method") === "email" ? "email" : "post";
+  if (!isDate(sentOn)) {
+    redirect(`/bills/${id}?error=${encodeURIComponent("送った日をカレンダーから選んでください")}`);
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("bill_mark_sent", { p_id: id, p_sent_on: sentOn, p_send_method: method });
+  if (error) {
+    const msg = error.code === "P0001" ? error.message : dbErrorMessage(error);
+    redirect(`/bills/${id}?error=${encodeURIComponent(msg ?? "保存できませんでした")}`);
+  }
+  revalidatePath("/bills");
+  revalidatePath(`/bills/${id}`);
+  redirect(`/bills/${id}?sent=1`);
+}
