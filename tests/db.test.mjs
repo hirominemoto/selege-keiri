@@ -1001,6 +1001,26 @@ await test("作り直す：作り直し中の請求は消せない・企業を�
   await rejects(`update public.bills set company_id = $2 where id = $1`, [id, emailCompanyId], /企業を変えられません/);
 });
 
+await test("作り直す：アプリと同じ authenticated の役割（RLS あり）でも作り直せる。前の版を直接は書けない", async () => {
+  await as(U1);
+  const id = (await saveBill(null, null, billHead(), [{ description: "RLS のテスト", unit_price: 1000, quantity: 1 }])).id;
+  await issue(id);
+  await db.exec(`
+    grant usage on schema public, auth to authenticated;
+    grant select, insert, update, delete on all tables in schema public to authenticated;
+    grant execute on all functions in schema public, auth to authenticated;
+    set role authenticated;
+  `);
+  try {
+    const r = await one(`select status, invoice_no from public.bill_reopen($1, 'RLS の確認')`, [id]);
+    assert.equal(r.status, "draft");
+    await rejects(`insert into public.bill_revisions (bill_id, revision, reason, snapshot) values ($1, 99, 'x', '{}')`, [id], /row-level security/);
+  } finally {
+    await db.exec(`reset role`);
+  }
+  assert.equal((await all(`select 1 from public.bill_revisions where bill_id = $1`, [id])).length, 1);
+});
+
 // ---- 企業シートの取り込み（0006） ----
 await test("企業シート：取り込むと入れ替わり、計上月は請求日の月になる", async () => {
   await as(U1);

@@ -22,7 +22,10 @@ comment on table public.bill_revisions is '作り直す前の請求書（前の�
 alter table public.bill_revisions enable row level security;
 drop policy if exists bill_revisions_select on public.bill_revisions;
 create policy bill_revisions_select on public.bill_revisions for select to authenticated using (public.is_member());
--- 書き込みは bill_reopen の中だけ（直接の insert・update・delete は決まりがないのでできない）
+-- 書き込みは bill_reopen の中だけ：鍵（app.bill_unlock）を開けた処理からの insert だけ通す。update・delete は決まりがないのでできない
+drop policy if exists bill_revisions_insert on public.bill_revisions;
+create policy bill_revisions_insert on public.bill_revisions for insert to authenticated
+  with check (public.is_admin() and public.bill_is_unlocked());
 
 -- 入力中でも、番号の付いた請求（作り直し中）は消せない・企業を変えられない。番号は鍵を開けた処理だけが変える
 create or replace function public.guard_bills()
@@ -146,13 +149,13 @@ begin
   end if;
 
   select coalesce(max(revision), 0) + 1 into rev from public.bill_revisions where bill_id = p_id;
+  perform set_config('app.bill_unlock', 'on', true);   -- 前の版を残す insert と、請求を戻す update の両方に要る
   insert into public.bill_revisions (bill_id, revision, reason, snapshot)
   values (p_id, rev, trim(p_reason), jsonb_build_object(
     'bill', to_jsonb(b),
     'lines', coalesce((select jsonb_agg(to_jsonb(l) order by l.sort, l.id) from public.bill_lines l where l.bill_id = p_id), '[]'::jsonb)
   ));
 
-  perform set_config('app.bill_unlock', 'on', true);
   update public.bills set
     status = 'draft',
     issued_at = null, issued_by = null,
