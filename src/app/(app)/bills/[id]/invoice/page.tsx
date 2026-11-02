@@ -82,7 +82,9 @@ export default async function BillInvoicePage({
       )}
       {isDraft && (
         <p className="notice no-print">
-          まだ下書きです（番号なし）。請求の画面で「請求書を作る」を押すと、番号が付いて金額が固まります。
+          {bill.invoice_no
+            ? `作り直し中の下書きです（№${bill.invoice_no}）。請求の画面で、もう一度「請求書を作る」を押すと金額が固まります。`
+            : "まだ下書きです（番号なし）。請求の画面で「請求書を作る」を押すと、番号が付いて金額が固まります。"}
         </p>
       )}
 

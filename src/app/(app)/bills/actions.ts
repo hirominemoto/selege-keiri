@@ -152,3 +152,23 @@ export async function markBillSent(fd: FormData): Promise<void> {
   revalidatePath(`/bills/${id}`);
   redirect(`/bills/${id}?sent=1`);
 }
+
+/** 「作り直す」：理由を書いて入力中に戻す。番号はそのまま、前の版は残る */
+export async function reopenBill(fd: FormData): Promise<void> {
+  await requireAdmin();
+  const id = text(fd, "id");
+  if (!id) return;
+  const reason = text(fd, "reason");
+  if (!reason) {
+    redirect(`/bills/${id}?error=${encodeURIComponent("作り直す理由を入れてください")}`);
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("bill_reopen", { p_id: id, p_reason: reason });
+  if (error) {
+    const msg = error.code === "P0001" ? error.message : dbErrorMessage(error);
+    redirect(`/bills/${id}?error=${encodeURIComponent(msg ?? "作り直せませんでした")}`);
+  }
+  revalidatePath("/bills");
+  revalidatePath(`/bills/${id}`);
+  redirect(`/bills/${id}?reopened=1`);
+}
