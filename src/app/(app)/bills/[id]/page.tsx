@@ -2,8 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ConfirmButton } from "@/components/InvoiceDraftForms";
 import { requireUser } from "@/lib/auth";
-import { invoiceTotals, type TaxRounding } from "@/lib/billing";
-import { billStatusText, todayJst, type Bill, type BillLine } from "@/lib/bills";
+import type { TaxRounding } from "@/lib/billing";
+import { billStatusText, billTotals, todayJst, type Bill, type BillLine } from "@/lib/bills";
 import { dateLabel, dateTimeLabel, monthLabel, sendMethodLabel, yen } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { deleteBill, issueBill, markBillSent } from "../actions";
@@ -38,15 +38,7 @@ export default async function BillPage({
       ? Number(billData.tax_rate)
       : Number(settings.get("tax_rate") ?? 0.1);
   // 請求書を作ったあとは、作ったときに固まった金額を出す
-  const totals =
-    billData.total !== null && billData.total !== undefined
-      ? {
-          taxable: billData.subtotal_taxable ?? 0,
-          nontaxable: billData.subtotal_nontaxable ?? 0,
-          tax: billData.tax_amount ?? 0,
-          total: billData.total as number,
-        }
-      : invoiceTotals(lines, taxRate, (settings.get("tax_rounding") ?? "ceil") as TaxRounding);
+  const totals = billTotals(bill, lines, taxRate, (settings.get("tax_rounding") ?? "ceil") as TaxRounding);
   const hasNontaxable = totals.nontaxable !== 0;
   const isDraft = bill.status === "draft";
   const { data: sheetRow } = await supabase

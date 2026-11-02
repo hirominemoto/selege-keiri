@@ -1,6 +1,6 @@
 /** 請求の入力（設計 v1.0）まわりの型と計算。画面の表示用 */
 
-import { addMonths, monthEnd } from "@/lib/billing";
+import { addMonths, invoiceTotals, monthEnd, type TaxRounding, type Totals } from "@/lib/billing";
 import { monthName, renderTemplate } from "@/lib/contract";
 
 export type BillStatus = "draft" | "issued" | "sent";
@@ -202,4 +202,33 @@ export function defaultDueDate(issueDate: string, months: number, day: number | 
 /** 日本時間の今日 "2026-10-30" */
 export function todayJst(now: Date = new Date()): string {
   return new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/** 請求書を作ったときに固まった金額。入力中（まだ固まっていない）なら null */
+export type FrozenAmounts = {
+  subtotal_taxable: number | null;
+  subtotal_nontaxable: number | null;
+  tax_amount: number | null;
+  total: number | null;
+};
+
+/**
+ * 請求の金額。請求書を作ったあとは固まった金額、入力中はいまの明細と税の設定から計算する。
+ * 一覧・請求の画面・請求書で、同じ金額を出すためにここだけで決める。
+ */
+export function billTotals(
+  b: FrozenAmounts,
+  lines: { amount: number; taxable: boolean }[],
+  taxRate: number,
+  taxRounding: TaxRounding,
+): Totals {
+  if (b.total !== null && b.total !== undefined) {
+    return {
+      taxable: b.subtotal_taxable ?? 0,
+      nontaxable: b.subtotal_nontaxable ?? 0,
+      tax: b.tax_amount ?? 0,
+      total: b.total,
+    };
+  }
+  return invoiceTotals(lines, taxRate, taxRounding);
 }
