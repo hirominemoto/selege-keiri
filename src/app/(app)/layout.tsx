@@ -13,6 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </Link>
           <nav className="app-nav" aria-label="メニュー">
             <Link href="/bills">請求の入力</Link>
+            <Link href="/excel">Excelへの記入</Link>
             <Link href="/companies">企業・契約</Link>
             <Link href="/billing">請求状況（お試し）</Link>
           </nav>
