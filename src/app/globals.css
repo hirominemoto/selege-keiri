@@ -708,7 +708,7 @@ tr.row-done td {
   letter-spacing: -0.03em;
 }
 .inv-lines tbody td {
-  height: 9.3mm;
+  height: var(--inv-row-h, 9.3mm); /* 9行以上は行を詰めて1枚に収める（InvoiceSheet が決める） */
 }
 .inv-lines .c-date {
   width: 20.5mm;
@@ -722,6 +722,15 @@ tr.row-done td {
      空白がなくて欄に収まらないときだけ、どこでも折る */
   word-break: keep-all;
   overflow-wrap: anywhere;
+}
+/* 9行以上：行の上下の余白と行間を詰めて、1枚に収める */
+.inv-lines-compact tbody td {
+  padding-top: 0.2mm;
+  padding-bottom: 0.2mm;
+  line-height: 1.2;
+}
+.inv-lines-compact td.c-desc {
+  line-height: 1.2;
 }
 /* 内訳を入れるところ・請求の画面の明細も、入力どおりに改行して見せる */
 .bill-desc {
