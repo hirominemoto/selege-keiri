@@ -927,12 +927,13 @@ await test("請求書を作る：画面を開いたあとに直されていた�
   assert.equal(b.total, 2200);
 });
 
-await test("請求書を作る：明細が9行以上あると作らない（A4 1枚・8行）", async () => {
-  const many = Array.from({ length: 9 }, (_, i) => ({ description: `行${i + 1}`, unit_price: 100, quantity: 1 }));
+await test("請求書を作る：明細が9行以上あっても1枚の請求書になる（1社1枚・行を詰める）", async () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ description: `行${i + 1}`, unit_price: 100, quantity: 1 }));
   const id = (await saveBill(null, null, billHead(), many)).id;
-  const v = (await one(`select version from public.bills where id = $1`, [id])).version;
-  await rejects(`select public.bill_issue($1, $2)`, [id, v], /8行まで/);
-  assert.equal((await one(`select status from public.bills where id = $1`, [id])).status, "draft");
+  const b = await issue(id);
+  assert.equal(b.status, "issued");
+  assert.ok(b.invoice_no);
+  assert.equal(b.total, 1320);
 });
 
 await test("送った：請求書を作る前は押せない。送った日と送り方が残り、二度押しても変わらない", async () => {

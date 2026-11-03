@@ -180,16 +180,16 @@ export default async function BillPage({
               まだアプリに入力しただけです。「請求書を見る（下書き）」で見え方を確かめてから、「請求書を作る」を押してください。
               押すと番号が付いて、金額が固まります（そのあとはここでは直せません）。
             </p>
+            {lines.length > 8 && (
+              <p className="notice">
+                明細が{lines.length}行あります。請求書は行を詰めて1枚に収めます。「請求書を見る（下書き）」で、いちばん下の請求書番号まで切れずに見えているかを確かめてください（見えたとおりに印刷されます）。
+              </p>
+            )}
             <div className="form-actions">
               <Link href={`/bills/${bill.id}/invoice`} className="btn btn-secondary">
                 請求書を見る（下書き）
               </Link>
-              {canEdit && lines.length > 8 && (
-                <p className="notice notice-warn">
-                  明細が{lines.length}行あります。請求書は8行までなので、このままでは作れません。「直す」で9行目からを別の請求に分けてください。
-                </p>
-              )}
-              {canEdit && lines.length <= 8 && (
+              {canEdit && (
                 <form action={issueBill}>
                   <input type="hidden" name="id" value={bill.id} />
                   <input type="hidden" name="version" value={bill.version} />

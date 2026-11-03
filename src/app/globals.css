@@ -568,7 +568,8 @@ tr.row-done td {
 .invoice-sheet {
   position: relative;
   width: 210mm;
-  min-height: 297mm;
+  /* 画面でも印刷と同じ高さで切る。下書きで切れて見えれば、印刷でも切れる（見たとおりに印刷される） */
+  height: 296mm;
   margin: 0 auto;
   padding: 24mm 33mm 10mm 20mm; /* 見本の請求書の余白（右が広い） */
   background: #fff;
@@ -708,7 +709,7 @@ tr.row-done td {
   letter-spacing: -0.03em;
 }
 .inv-lines tbody td {
-  height: 9.3mm;
+  height: var(--inv-row-h, 9.3mm); /* 9行以上は行を詰めて1枚に収める（InvoiceSheet が決める） */
 }
 .inv-lines .c-date {
   width: 20.5mm;
@@ -722,6 +723,15 @@ tr.row-done td {
      空白がなくて欄に収まらないときだけ、どこでも折る */
   word-break: keep-all;
   overflow-wrap: anywhere;
+}
+/* 9行以上：行の上下の余白と行間を詰めて、1枚に収める */
+.inv-lines-compact tbody td {
+  padding-top: 0.2mm;
+  padding-bottom: 0.2mm;
+  line-height: 1.2;
+}
+.inv-lines-compact td.c-desc {
+  line-height: 1.2;
 }
 /* 内訳を入れるところ・請求の画面の明細も、入力どおりに改行して見せる */
 .bill-desc {

@@ -1,3 +1,4 @@
+import type React from "react";
 import { invoiceTotals, type Issuer, type TaxRounding, type Totals } from "@/lib/billing";
 
 export type SheetLine = {
@@ -26,6 +27,12 @@ type Props = {
 };
 
 const ROWS = 8; // 旧Excelの請求書と同じ明細8行
+const ROW_MM = 9.3; // 8行のときの1行の高さ
+/** 9行以上のとき、明細に使える高さ（8行ぶん＋下の余白）を行の数で割る。1社1枚に収めるため（11/03 ひろみ決定） */
+const ROWS_AREA_MM = 83;
+const MIN_ROW_MM = 5;
+const rowHeightMm = (n: number) =>
+  n <= ROWS ? ROW_MM : Math.max(MIN_ROW_MM, Math.floor((ROWS_AREA_MM / n) * 10) / 10);
 
 const n = (v: number) => v.toLocaleString("ja-JP");
 const yenMark = (v: number) => `¥${n(v)}`;
@@ -101,7 +108,10 @@ export function InvoiceSheet(p: Props) {
         </div>
       </div>
 
-      <table className="inv-lines">
+      <table
+        className={p.lines.length > ROWS ? "inv-lines inv-lines-compact" : "inv-lines"}
+        style={{ "--inv-row-h": `${rowHeightMm(p.lines.length)}mm` } as React.CSSProperties}
+      >
         <thead>
           <tr>
             <th className="c-date">内定日</th>
