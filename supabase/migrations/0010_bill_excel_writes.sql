@@ -31,7 +31,8 @@ drop policy if exists bill_excel_writes_delete on public.bill_excel_writes;
 create policy bill_excel_writes_delete on public.bill_excel_writes for delete to authenticated using (public.is_admin());
 -- update の決まりはない（直さない。書き直すときは取り消してから、もう一度書く）
 
--- 書いた記録を残す。p_items = [{bill_id, sheet, first_row, last_row}, …]。1件でも書けないものがあれば、どれも残さない
+-- 書いた記録を残す。p_items = [{bill_id, issued_at, sheet, first_row, last_row}, …]。1件でも書けないものがあれば、どれも残さない
+--   issued_at は、画面で書く行を作ったときの「請求書を作った日時」。そのあとに作り直されていたら記録しない（古い中身をExcelに書いたことになるため）
 create or replace function public.bill_excel_mark(p_book text, p_file_name text, p_items jsonb)
 returns integer
 language plpgsql
@@ -57,6 +58,10 @@ begin
     end if;
     if b.status not in ('issued', 'sent') then
       raise exception '請求書を作る前の請求は、Excelに書けません（%）', coalesce(b.invoice_no, '番号なし');
+    end if;
+    if (it->>'issued_at') is null or (it->>'issued_at')::timestamptz is distinct from b.issued_at then
+      raise exception '画面を開いたあとに、この請求（%）の請求書が作り直されています。画面を読み込み直して、ファイルを選び直してください', b.invoice_no
+        using errcode = '40001';
     end if;
     if exists (select 1 from public.bill_excel_writes where bill_id = b.id and book = p_book) then
       raise exception 'この請求（%）は、もうこのExcelに書いてあります', b.invoice_no;

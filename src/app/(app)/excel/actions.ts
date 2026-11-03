@@ -6,7 +6,7 @@ import { dbErrorMessage, text, type FormState } from "@/lib/form";
 import { createClient } from "@/lib/supabase/server";
 
 export type ExcelBook = "sales" | "ledger" | "company";
-export type WrittenItem = { bill_id: string; sheet: string; first_row: number; last_row: number };
+export type WrittenItem = { bill_id: string; issued_at: string; sheet: string; first_row: number; last_row: number };
 
 const BOOKS: ExcelBook[] = ["sales", "ledger", "company"];
 
@@ -17,6 +17,7 @@ export async function markExcelWritten(book: ExcelBook, fileName: string, items:
   const bad = items.find(
     (i) =>
       typeof i.bill_id !== "string" ||
+      typeof i.issued_at !== "string" ||
       typeof i.sheet !== "string" ||
       !Number.isInteger(i.first_row) ||
       !Number.isInteger(i.last_row) ||
@@ -30,7 +31,9 @@ export async function markExcelWritten(book: ExcelBook, fileName: string, items:
     p_file_name: fileName.slice(0, 200),
     p_items: items,
   });
-  if (error) return { ok: false, message: error.code === "P0001" ? error.message : dbErrorMessage(error) };
+  if (error) {
+    return { ok: false, message: error.code === "P0001" || error.code === "40001" ? error.message : dbErrorMessage(error) };
+  }
   revalidatePath("/excel");
   revalidatePath("/bills", "layout");
   return { ok: true, message: `${data}件を記録しました` };

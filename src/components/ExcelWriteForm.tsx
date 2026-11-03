@@ -11,6 +11,8 @@ import { LEDGER_SHEET } from "@/lib/excelRows";
 
 export type ExcelWriteItem = {
   billId: string;
+  /** 書く行を作ったときの「請求書を作った日時」。記録するときに、そのあと作り直されていないかを確かめる */
+  issuedAt: string;
   invoiceNo: string;
   company: string;
   total: number;
@@ -87,7 +89,7 @@ export function ExcelWriteForm(props: {
       const firstRow = written[0].firstRow;
       let r = firstRow;
       const items: WrittenItem[] = toWrite.map((i) => {
-        const it = { bill_id: i.billId, sheet: props.sheet, first_row: r, last_row: r + i.rows.length - 1 };
+        const it = { bill_id: i.billId, issued_at: i.issuedAt, sheet: props.sheet, first_row: r, last_row: r + i.rows.length - 1 };
         r += i.rows.length;
         return it;
       });

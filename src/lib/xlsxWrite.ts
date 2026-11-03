@@ -380,8 +380,9 @@ export async function appendRows(
     if (ct) await setEntryText(ct, (await entryText(ct)).replace(/<Override\b[^>]*PartName="\/xl\/calcChain\.xml"[^>]*\/>/g, ""));
   }
   if (/<calcPr\b/.test(workbook)) {
-    workbook = workbook.replace(/<calcPr\b([^>]*?)\/>/, (m, a: string) =>
-      /fullCalcOnLoad=/.test(a) ? m : `<calcPr${a} fullCalcOnLoad="1"/>`,
+    // もとが fullCalcOnLoad="0" でも、かならず "1" にする（書いた行に合わせて合計を計算し直すため）
+    workbook = workbook.replace(/<calcPr\b([^>]*?)\/>/, (_m, a: string) =>
+      `<calcPr${a.replace(/\sfullCalcOnLoad="[^"]*"/, "")} fullCalcOnLoad="1"/>`,
     );
   } else {
     // calcPr は definedNames（なければ sheets）のすぐあとに置く決まり

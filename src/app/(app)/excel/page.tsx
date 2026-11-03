@@ -72,6 +72,7 @@ export default async function ExcelPage({ searchParams }: { searchParams: Promis
       const marks = book === "sales" ? { C: first.C } : { B: first.B, C: first.C, D: first.D };
       return {
         billId: b.id,
+        issuedAt: b.issued_at ?? "",
         invoiceNo: b.invoice_no ?? "",
         company: b.companies?.name ?? "",
         total: b.total ?? 0,
@@ -134,6 +135,7 @@ export default async function ExcelPage({ searchParams }: { searchParams: Promis
       ) : (
         <>
           <ExcelWriteForm
+            key={`sales-${m}`}
             book="sales"
             title="売上表"
             sheet={`${mNo}月`}
@@ -142,6 +144,7 @@ export default async function ExcelPage({ searchParams }: { searchParams: Promis
             canEdit={canEdit}
           />
           <ExcelWriteForm
+            key={`ledger-${m}`}
             book="ledger"
             title="収支一覧"
             sheet={LEDGER_SHEET}

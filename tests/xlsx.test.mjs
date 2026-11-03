@@ -113,6 +113,17 @@ await test("開いたときに計算し直す印が付き、calcChain は消え�
   assert.doesNotMatch(await sheetXml(data, "[Content_Types].xml"), /calcChain/);
 });
 
+await test("もとが fullCalcOnLoad=\"0\" でも、計算し直す印は \"1\" になる", async () => {
+  const off = storedZip({
+    "[Content_Types].xml": `<Types/>`,
+    "xl/workbook.xml": `<workbook xmlns:r="r"><sheets><sheet name="11月" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="1" fullCalcOnLoad="0"/></workbook>`,
+    "xl/_rels/workbook.xml.rels": `<Relationships><Relationship Id="rId1" Type="ws" Target="worksheets/sheet1.xml"/></Relationships>`,
+    "xl/worksheets/sheet1.xml": sheet,
+  });
+  const { data } = await appendRows(off, [{ sheet: "11月", startRow: 2, keyCol: "B", rows: [{ B: "a" }] }]);
+  assert.match(await sheetXml(data, "xl/workbook.xml"), /<calcPr calcId="1" fullCalcOnLoad="1"\/>/);
+});
+
 /** zip の中のファイルを文字で読む（テスト用。なければ null） */
 async function sheetXml(data, path) {
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
