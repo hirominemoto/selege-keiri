@@ -568,7 +568,8 @@ tr.row-done td {
 .invoice-sheet {
   position: relative;
   width: 210mm;
-  min-height: 297mm;
+  /* 画面でも印刷と同じ高さで切る。下書きで切れて見えれば、印刷でも切れる（見たとおりに印刷される） */
+  height: 296mm;
   margin: 0 auto;
   padding: 24mm 33mm 10mm 20mm; /* 見本の請求書の余白（右が広い） */
   background: #fff;

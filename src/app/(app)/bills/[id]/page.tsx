@@ -182,7 +182,7 @@ export default async function BillPage({
             </p>
             {lines.length > 8 && (
               <p className="notice">
-                明細が{lines.length}行あります。請求書は行を詰めて1枚に収めます。「請求書を見る（下書き）」で、下まで切れずに入っているかを確かめてください。
+                明細が{lines.length}行あります。請求書は行を詰めて1枚に収めます。「請求書を見る（下書き）」で、いちばん下の請求書番号まで切れずに見えているかを確かめてください（見えたとおりに印刷されます）。
               </p>
             )}
             <div className="form-actions">
