@@ -1052,4 +1052,46 @@ await test("企業シート：請求済みとみなす日付の設定が入る",
   assert.equal((await one(`select value #>> '{}' as v from public.app_settings where key = 'legacy_billed_until'`)).v, "2026-10-31");
 });
 
+// ---- Excelへの記入の記録（0010） ----
+await test("Excelへの記入：請求書を作った請求だけ記録でき、同じブックに二度は書けない。取り消すとまた書ける", async () => {
+  await as(U1);
+  const id = (await saveBill(null, null, billHead(), [{ description: "記入のテスト", unit_price: 1000, quantity: 2 }])).id;
+  let issuedAt = null;
+  const item = (first) => JSON.stringify([{ bill_id: id, issued_at: issuedAt, sheet: "11月", first_row: first, last_row: first }]);
+  await rejects(`select public.bill_excel_mark('sales', 'a.xlsx', $1::jsonb)`, [item(2)], /請求書を作る前/);
+  const b = await issue(id);
+  // 画面を開く前の（古い）請求書の日時では記録しない
+  issuedAt = "2000-01-01T00:00:00Z";
+  await rejects(`select public.bill_excel_mark('sales', 'a.xlsx', $1::jsonb)`, [item(2)], /作り直されています/);
+  issuedAt = b.issued_at;
+  assert.equal((await one(`select public.bill_excel_mark('sales', '売上表.xlsx', $1::jsonb) as n`, [item(2)])).n, 1);
+  const w = await one(`select * from public.bill_excel_writes where bill_id = $1 and book = 'sales'`, [id]);
+  assert.equal(w.invoice_no, b.invoice_no);
+  assert.equal(w.total, 2200);
+  assert.equal(w.file_name, "売上表.xlsx");
+  await rejects(`select public.bill_excel_mark('sales', 'b.xlsx', $1::jsonb)`, [item(3)], /もうこのExcelに書いてあります/);
+  // 別のブック（収支一覧）には書ける
+  assert.equal((await one(`select public.bill_excel_mark('ledger', null, $1::jsonb) as n`, [item(30)])).n, 1);
+  await as(U2);
+  await rejects(`select public.bill_excel_mark('company', null, $1::jsonb)`, [item(2)], /管理者だけ/);
+  await rejects(`select public.bill_excel_unmark($1, 'sales')`, [id], /管理者だけ/);
+  await as(U1);
+  assert.equal((await one(`select public.bill_excel_unmark($1, 'sales') as n`, [id])).n, 1);
+  assert.equal((await one(`select public.bill_excel_mark('sales', 'c.xlsx', $1::jsonb) as n`, [item(4)])).n, 1);
+  await rejects(`select public.bill_excel_mark('nope', null, $1::jsonb)`, [item(2)], /ブックの種類/);
+});
+
+await test("Excelへの記入：1件でも書けない請求があれば、どれも記録しない", async () => {
+  await as(U1);
+  const a = (await saveBill(null, null, billHead(), [{ description: "まとめA", unit_price: 100, quantity: 1 }])).id;
+  const d = (await saveBill(null, null, billHead(), [{ description: "まとめB（入力中）", unit_price: 100, quantity: 1 }])).id;
+  const ia = (await issue(a)).issued_at;
+  const items = JSON.stringify([
+    { bill_id: a, issued_at: ia, sheet: "11月", first_row: 5, last_row: 5 },
+    { bill_id: d, issued_at: ia, sheet: "11月", first_row: 6, last_row: 6 },
+  ]);
+  await rejects(`select public.bill_excel_mark('sales', null, $1::jsonb)`, [items], /請求書を作る前/);
+  assert.equal((await one(`select count(*)::int as n from public.bill_excel_writes where bill_id = $1`, [a])).n, 0);
+});
+
 console.log(`\n${passed} 件成功${process.exitCode ? "（失敗あり）" : ""}`);

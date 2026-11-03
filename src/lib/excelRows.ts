@@ -1,9 +1,11 @@
 /**
  * アプリで入力した請求1件から、3つのExcelに足す行を作る（列の並びはExcelのまま）
  *   企業シート・売上表（月別シート）・収支一覧（売上の明細）
- * いまは画面で見せるだけ。ファイルに書く処理は、この行をそのまま使う
+ * 請求の画面の見本と、「Excelへの記入」で書き足す行は、どちらもここで作る（toSheetEdit で xlsxWrite に渡す）
  * 列の対応は docs/decisions.md「フォームとExcelの対応」「収支一覧ブック」
  */
+
+import type { SheetEdit, WriteRow } from "@/lib/xlsxWrite";
 
 export type ExcelCell = string | number | null;
 export type ExcelColumn = { col: string; label: string };
@@ -13,6 +15,9 @@ export type ExcelRows = {
   sheetNote?: string;
   columns: ExcelColumn[];
   rows: ExcelCell[][];
+  /** 書き足すときの、表の始まりの行と「空いている行」を見分ける列 */
+  startRow?: number;
+  keyCol?: string;
   notes: string[];
 };
 
@@ -28,6 +33,10 @@ export type BillForExcel = {
 };
 
 const monthNo = (d: string) => Number(d.slice(5, 7));
+/** 同じ請求書の2行目からの入金予定（今までのExcelと同じ書き方。11/03 ひろみ決定） */
+export const DITTO = "〃";
+/** 収支一覧の、売上の明細のシート */
+export const LEDGER_SHEET = "売上（NEW）";
 
 export function excelRowsForBill(bill: BillForExcel, companySheetName: string | null): ExcelRows[] {
   const m = monthNo(bill.accounting_month);
@@ -67,19 +76,19 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
   const salesSheet: ExcelRows = {
     book: "売上表",
     sheet: `${m}月`,
-    sheetNote: `売上表（${fiscalYear}年度）のブックの「${m}月」シート（73行目からの表）に足します`,
+    sheetNote: `売上表（${fiscalYear}年度）のブックの「${m}月」シートの、B 社名が空いているいちばん上の行から足します`,
+    startRow: 2,
+    keyCol: "B",
     columns: [
       { col: "A", label: "担当" },
       { col: "B", label: "社名" },
       { col: "C", label: "請求書№" },
-      { col: "D", label: "内訳" },
+      { col: "D", label: "商品名（内訳）" },
       { col: "E", label: "発売日" },
       { col: "F", label: "個数" },
       { col: "G", label: "受注金額" },
       { col: "H", label: "税込" },
       { col: "N", label: "入金予定" },
-      { col: "O", label: "入金確認" },
-      { col: "P", label: "入金金額" },
     ],
     rows: bill.lines.map((l, i) => [
       bill.staff_name,
@@ -90,47 +99,42 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
       l.quantity,
       l.amount,
       i === 0 ? bill.invoice_total : null,
-      bill.payment_due_date,
-      null,
-      null,
+      i === 0 ? bill.payment_due_date : DITTO,
     ]),
     notes: [
-      "H 税込は、請求書の合計（税込）を1行目にだけ入れます。2行目からは空けておきます（入金額と見比べやすくするため。行ごとの ×1.1 は書かない）",
-      "I〜M列（掲載原価など）は空けたままです",
-      "O 入金確認・P 入金金額は空けておきます（ひろみさんが売掛を確かめて記入）",
+      "H 税込は、請求書の合計（税込）を1行目にだけ入れます。2行目からは空けておきます（入金額と見比べやすくするため）",
+      "N 入金予定は、1行目に日付、2行目からは「〃」",
+      "I〜M列（掲載原価など）と O 入金確認・P 入金金額は空けておきます（入金はひろみさんが売掛を確かめて記入）",
     ],
   };
 
   const ledger: ExcelRows = {
     book: "収支一覧",
-    sheet: "売上の明細",
-    sheetNote: "いちばん下に足します",
+    sheet: LEDGER_SHEET,
+    sheetNote: "B 請求月が空いているいちばん上の行から足します",
+    startRow: 2,
+    keyCol: "B",
     columns: [
-      { col: "", label: "年" },
-      { col: "", label: "請求月" },
-      { col: "", label: "社名" },
-      { col: "", label: "内訳" },
-      { col: "", label: "受注金額" },
-      { col: "", label: "請求金額（税込）" },
-      { col: "", label: "入金予定" },
-      { col: "", label: "入金日" },
-      { col: "", label: "入金金額" },
+      { col: "B", label: "請求月" },
+      { col: "C", label: "社名" },
+      { col: "D", label: "内訳" },
+      { col: "E", label: "受注金額" },
+      { col: "F", label: "請求額（税込）" },
+      { col: "G", label: "入金予定" },
     ],
     rows: bill.lines.map((l, i) => [
-      String(year),
-      `${m}月`,
+      (year % 100) * 100 + m,
       bill.company_name,
       oneLine(l.description),
       l.amount,
       i === 0 ? bill.invoice_total : null,
-      bill.payment_due_date,
-      null,
-      null,
+      i === 0 ? bill.payment_due_date : DITTO,
     ]),
     notes: [
-      "請求金額（税込）は、請求書の合計を1行目にだけ入れます（明細が何行あっても、入金額と1対1で見比べられるように）",
-      "入金日・入金金額は空けておきます（ひろみさんが記入）",
-      `${m}月の合計は、月ごとの一覧（収支一覧表）に、請求金額（税込）を足す式で出ます`,
+      `B 請求月は「${(year % 100) * 100 + m}」のように年と月の数字で入れます（収支一覧2027（NEW）の SUMIF がこの列で月を見分けます）`,
+      "F 請求額（税込）は、請求書の合計を1行目にだけ入れます（明細が何行あっても、入金額と1対1で見比べられるように）",
+      "G 入金予定は、1行目に日付、2行目からは「〃」",
+      "H 入金日・I 入金金額は空けておきます（ひろみさんが記入）",
     ],
   };
 
@@ -140,4 +144,22 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
 /** 内訳の改行は請求書の上だけのもの。Excelには1行にして書く */
 function oneLine(s: string): string {
   return s.replace(/\s*\r?\n\s*/g, "");
+}
+
+/** 見本の行（ExcelRows）を、書き足す部品（xlsxWrite）に渡す形にする。日付の文字は Excel の日付にする */
+export function toSheetEdit(b: ExcelRows): SheetEdit {
+  return {
+    sheet: b.sheet,
+    startRow: b.startRow ?? 2,
+    keyCol: b.keyCol ?? "B",
+    rows: b.rows.map((r) => {
+      const out: WriteRow = {};
+      r.forEach((v, i) => {
+        const col = b.columns[i]?.col;
+        if (!col || v === null || v === "") return;
+        out[col] = typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? { date: v } : v;
+      });
+      return out;
+    }),
+  };
 }
