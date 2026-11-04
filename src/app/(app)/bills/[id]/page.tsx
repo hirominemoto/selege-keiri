@@ -195,7 +195,7 @@ export default async function BillPage({
           <>
             <p className="muted">
               まだアプリに入力しただけです。「請求書を見る（下書き）」で見え方を確かめてから、「請求書を作る」を押してください。
-              押すと番号が付いて、金額が固まります（そのあとはここでは直せません）。
+              押すと番号が付いて、金額が固まります。送る前なら、そのあとも「作り直す」で直せて、「この請求を消す」で消せます。
             </p>
             {lines.length > 8 && (
               <p className="notice">
@@ -211,7 +211,7 @@ export default async function BillPage({
                   <input type="hidden" name="id" value={bill.id} />
                   <input type="hidden" name="version" value={bill.version} />
                   <ConfirmButton
-                    message={`${bill.companies?.name ?? ""} の請求書を作ります（合計 ${yen(totals.total)}）。番号が付き、このあとは直せなくなります。よろしいですか？`}
+                    message={`${bill.companies?.name ?? ""} の請求書を作ります（合計 ${yen(totals.total)}）。番号が付いて金額が固まります（送る前なら、あとから「作り直す」で直せます）。よろしいですか？`}
                     className="btn"
                   >
                     請求書を作る
