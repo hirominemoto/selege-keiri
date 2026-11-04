@@ -25,9 +25,9 @@ type Row = {
 export default async function BillsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; deleted?: string; company?: string }>;
+  searchParams: Promise<{ month?: string; deleted?: string; company?: string; show?: string }>;
 }) {
-  const { month, deleted, company } = await searchParams;
+  const { month, deleted, company, show } = await searchParams;
   const user = await requireUser();
   const m = parseMonth(month) ?? currentMonthJst();
   const supabase = await createClient();
@@ -53,6 +53,12 @@ export default async function BillsPage({
     totals: billTotals(r, r.bill_lines, taxRate, taxRounding),
   }));
   const drafts = rows.filter((r) => r.status === "draft").length;
+  // 郵送でまだ送っていないもの（請求書を作って、まだ「送った」を押していない）。南條さんが印刷して投函する分
+  const isPostUnsent = (r: (typeof rows)[number]) => r.send_method === "post" && r.status === "issued";
+  const postUnsent = rows.filter(isPostUnsent).length;
+  const onlyPost = show === "post-unsent" && !company;
+  const shown = onlyPost ? rows.filter(isPostUnsent) : rows;
+  const monthQ = `month=${m.slice(0, 7)}`;
   const sum = rows.reduce((s, r) => s + r.totals.total, 0);
 
   return (
@@ -104,13 +110,28 @@ export default async function BillsPage({
         <span>
           アプリに入力済み（請求書はまだ）<strong>{drafts}件</strong>
         </span>
+        {!companyRow && (
+          <Link
+            href={onlyPost ? `/bills?${monthQ}` : `/bills?${monthQ}&show=post-unsent`}
+            className={`chip-link${onlyPost ? " chip-link-on" : ""}`}
+          >
+            郵送でまだ送っていない<strong>{postUnsent}件</strong>
+            {onlyPost && <span className="chip-x">（すべて表示に戻す）</span>}
+          </Link>
+        )}
         <span>
           合計（税込）<strong>{yen(sum)}</strong>
         </span>
       </div>
 
-      {rows.length === 0 ? (
-        <p className="empty">{companyRow ? "この企業の請求はまだありません。" : "この月の請求はまだありません。"}</p>
+      {shown.length === 0 ? (
+        <p className="empty">
+          {onlyPost
+            ? "郵送でまだ送っていない請求書はありません。"
+            : companyRow
+              ? "この企業の請求はまだありません。"
+              : "この月の請求はまだありません。"}
+        </p>
       ) : (
         <div className="table-wrap card">
           <table>
@@ -125,7 +146,7 @@ export default async function BillsPage({
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {shown.map((r) => (
                 <tr key={r.id}>
                   <td>{dateLabel(r.issue_date)}</td>
                   <td>
