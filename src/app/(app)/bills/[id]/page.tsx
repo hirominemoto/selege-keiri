@@ -9,6 +9,9 @@ import { createClient } from "@/lib/supabase/server";
 import { deleteBill, issueBill, markBillSent, reopenBill } from "../actions";
 import { ExcelRowsPreview } from "@/components/ExcelRowsPreview";
 import { excelRowsForBill } from "@/lib/excelRows";
+import { unmarkExcelWritten } from "@/app/(app)/excel/actions";
+
+const EXCEL_BOOK_LABEL = { sales: "売上表", ledger: "収支一覧", company: "企業シート" } as const;
 
 export default async function BillPage({
   params,
@@ -27,10 +30,16 @@ export default async function BillPage({
     supabase.from("bills").select("*, companies(name)").eq("id", id).maybeSingle(),
     supabase.from("bill_lines").select("*").eq("bill_id", id).order("sort"),
     supabase.from("app_settings").select("key, value").in("key", ["tax_rate", "tax_rounding"]),
-    supabase.from("bill_revisions").select("revision, reason, created_at, snapshot->bill->>total, snapshot->bill->>invoice_no").eq("bill_id", id).order("revision"),
+    supabase.from("bill_revisions").select("revision, reason, created_at, snapshot->bill->>total, snapshot->bill->>invoice_no, snapshot->bill->>status").eq("bill_id", id).order("revision"),
   ]);
   if (!billData) notFound();
-  const revisions = (revData ?? []) as unknown as { revision: number; reason: string; created_at: string; total: string | null }[];
+  const revisions = (revData ?? []) as unknown as {
+    revision: number;
+    reason: string;
+    created_at: string;
+    total: string | null;
+    status: string | null;
+  }[];
   const reworking = billData.status === "draft" && billData.invoice_no !== null;
   const bill = billData as Bill & { companies: { name: string } | null };
   const lines = (lineData ?? []) as BillLine[];
@@ -44,6 +53,14 @@ export default async function BillPage({
   const totals = billTotals(bill, lines, taxRate, (settings.get("tax_rounding") ?? "ceil") as TaxRounding);
   const hasNontaxable = totals.nontaxable !== 0;
   const isDraft = bill.status === "draft";
+  // 一度でも送ったか（線を引くのは「送った」。送る前は自由に直せて消せる。11/04 ひろみ決定）
+  const everSent = bill.status === "sent" || revisions.some((r) => r.status === "sent");
+  const { data: writeRows } = await supabase
+    .from("bill_excel_writes")
+    .select("book, sheet, first_row, last_row")
+    .eq("bill_id", id);
+  const excelWrites = (writeRows ?? []) as { book: "sales" | "ledger" | "company"; sheet: string; first_row: number; last_row: number }[];
+  const excelWritten = excelWrites.length > 0;
   const { data: sheetRow } = await supabase
     .from("legacy_sheet_rows")
     .select("sheet_name")
@@ -249,18 +266,26 @@ export default async function BillPage({
       {canEdit && !isDraft && (
         <div className="card">
           <h2>作り直す</h2>
-          <p className="muted">
-            請求書を作ったあとに間違いに気づいたときに使います。理由を書いて押すと「入力中」に戻り、「直す」で直せるようになります。
-            番号（№{bill.invoice_no}）はそのままで、いまの請求書は「前の版」として残ります。直したら、もう一度「請求書を作る」を押してください。
-          </p>
+          {everSent ? (
+            <p className="muted">
+              送ったあとに間違いに気づいたときに使います。理由を書いて押すと「入力中」に戻り、「直す」で直せるようになります。
+              番号（№{bill.invoice_no}）はそのままで、いまの請求書は「前の版」として残ります。直したら、もう一度「請求書を作る」を押して、送り直してください。
+            </p>
+          ) : (
+            <p className="muted">
+              まだ送っていないので、何度でも直せます。押すと「入力中」に戻り、「直す」で直せるようになります。番号（№{bill.invoice_no}）はそのままです。
+              直したら、もう一度「請求書を作る」を押してください。
+            </p>
+          )}
           <form action={reopenBill} className="form">
             <input type="hidden" name="id" value={bill.id} />
+            <input type="hidden" name="ever_sent" value={everSent ? "1" : ""} />
             <label>
-              作り直す理由
-              <textarea name="reason" rows={2} required placeholder="例：内訳の月を間違えた" />
+              {everSent ? "作り直す理由" : "作り直す理由（書かなくても大丈夫です）"}
+              <textarea name="reason" rows={2} required={everSent} placeholder="例：内訳の月を間違えた" />
             </label>
             <div className="form-actions">
-              <ConfirmButton message={`№${bill.invoice_no} の請求書を作り直します。よろしいですか？（番号はそのまま。いまの請求書は前の版として残ります）`} className="btn btn-secondary">
+              <ConfirmButton message={`№${bill.invoice_no} の請求書を作り直します。よろしいですか？（番号はそのまま）`} className="btn btn-secondary">
                 作り直す
               </ConfirmButton>
             </div>
@@ -296,16 +321,54 @@ export default async function BillPage({
         </div>
       )}
 
-      {canEdit && isDraft && !reworking && (
+      {canEdit && !everSent && (
         <div className="card">
-          <h2>このあと</h2>
-          <p className="muted">「Excelに書き込む」（企業シート・売上表・収支一覧への記入）は、次の段階で作ります。</p>
-          <form action={deleteBill} className="form-actions">
-            <input type="hidden" name="id" value={bill.id} />
-            <ConfirmButton message="この請求を消します。よろしいですか？（まだ請求書を作っていないので、請求書番号は使われません）" className="btn btn-danger-quiet">
-              この請求を消す
-            </ConfirmButton>
-          </form>
+          <h2>この請求を消す</h2>
+          {excelWritten ? (
+            <>
+              <p className="muted">
+                Excelに記入済みなので、まだ消せません。Excelの行を手で消してから、下の「記入を取り消す」を押してください。取り消すと消せるようになります。
+              </p>
+              <ul className="excel-written-list">
+                {excelWrites.map((w) => (
+                  <li key={w.book}>
+                    {EXCEL_BOOK_LABEL[w.book]}「{w.sheet}」{w.first_row}
+                    {w.last_row !== w.first_row && `〜${w.last_row}`}行目{" "}
+                    <form action={unmarkExcelWritten} style={{ display: "inline" }}>
+                      <input type="hidden" name="bill_id" value={bill.id} />
+                      <input type="hidden" name="book" value={w.book} />
+                      <ConfirmButton
+                        message={`${EXCEL_BOOK_LABEL[w.book]}の「記入済み」を取り消します。Excelの行は消えません（手で消してください）。よろしいですか？`}
+                      >
+                        記入を取り消す
+                      </ConfirmButton>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <>
+              <p className="muted">
+                {bill.invoice_no
+                  ? `まだ送っていないので消せます。番号（№${bill.invoice_no}）は使わずに飛びます。`
+                  : "まだ請求書を作っていないので、請求書番号は使われません。"}
+              </p>
+              <form action={deleteBill} className="form-actions">
+                <input type="hidden" name="id" value={bill.id} />
+                <ConfirmButton
+                  message={
+                    bill.invoice_no
+                      ? `№${bill.invoice_no} の請求書を消します。よろしいですか？（まだ送っていない請求書です。番号は飛びます）`
+                      : "この請求を消します。よろしいですか？（まだ請求書を作っていないので、請求書番号は使われません）"
+                  }
+                  className="btn btn-danger-quiet"
+                >
+                  この請求を消す
+                </ConfirmButton>
+              </form>
+            </>
+          )}
         </div>
       )}
     </main>

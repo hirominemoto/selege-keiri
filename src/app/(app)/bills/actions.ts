@@ -110,7 +110,10 @@ export async function deleteBill(fd: FormData): Promise<void> {
   if (!id) return;
   const supabase = await createClient();
   const { error } = await supabase.rpc("bill_delete_draft", { p_id: id });
-  if (error) throw new Error(error.message);
+  if (error) {
+    const msg = error.code === "P0001" ? error.message : dbErrorMessage(error);
+    redirect(`/bills/${id}?error=${encodeURIComponent(msg ?? "消せませんでした")}`);
+  }
   revalidatePath("/bills");
   redirect("/bills?deleted=1");
 }
@@ -158,9 +161,10 @@ export async function reopenBill(fd: FormData): Promise<void> {
   await requireAdmin();
   const id = text(fd, "id");
   if (!id) return;
-  const reason = text(fd, "reason");
-  if (!reason) {
-    redirect(`/bills/${id}?error=${encodeURIComponent("作り直す理由を入れてください")}`);
+  // 理由が要るのは送ったあとだけ（送る前は空でよい。最後はデータベースが確かめる）
+  const reason = text(fd, "reason") ?? "";
+  if (!reason && text(fd, "ever_sent")) {
+    redirect(`/bills/${id}?error=${encodeURIComponent("送ったあとの請求書を作り直すときは、理由を入れてください")}`);
   }
   const supabase = await createClient();
   const { error } = await supabase.rpc("bill_reopen", { p_id: id, p_reason: reason });
