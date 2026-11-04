@@ -45,16 +45,29 @@ export default async function BillsPage({
     company ? supabase.from("companies").select("id, name").eq("id", company).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   // 10/31 までの請求（企業シートから取り込んだ行）。請求書・企業ごとに、請求日でまとめて出す（見るだけ）
-  let legacyQuery = supabase
-    .from("legacy_sheet_rows")
-    .select("company_id, issue_date, description, amount, row_no, companies(name)");
-  legacyQuery = company
-    ? legacyQuery.eq("company_id", company).order("issue_date", { ascending: false })
-    : legacyQuery.eq("accounting_month", m).order("issue_date");
-  const { data: legacyData } = await legacyQuery.order("row_no");
+  // 請求済みとみなすのは legacy_billed_until（10/31）までの行だけ（企業の履歴と同じ線引き）
+  const { data: cutoffRow } = await supabase.from("app_settings").select("value").eq("key", "legacy_billed_until").maybeSingle();
+  const billedUntil = typeof cutoffRow?.value === "string" ? cutoffRow.value : "2026-10-31";
+  // Supabase は1回に1000行までなので、分けて読む（並びを決めて、途中で切れないように）
+  const legacyData: unknown[] = [];
+  for (let from = 0; ; from += 1000) {
+    let q = supabase
+      .from("legacy_sheet_rows")
+      .select("id, company_id, issue_date, description, amount, row_no, companies(name)")
+      .lte("issue_date", billedUntil);
+    q = company ? q.eq("company_id", company) : q.eq("accounting_month", m);
+    const { data } = await q
+      .order("issue_date", { ascending: !company })
+      .order("company_id")
+      .order("row_no")
+      .order("id")
+      .range(from, from + 999);
+    legacyData.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
   type LegacyRow = { company_id: string; issue_date: string; description: string; amount: number; companies: { name: string } | null };
   const legacyGroups: { key: string; issue_date: string; company: string; lines: string[]; amount: number }[] = [];
-  for (const r of (legacyData ?? []) as unknown as LegacyRow[]) {
+  for (const r of legacyData as LegacyRow[]) {
     const key = `${r.company_id}|${r.issue_date}`;
     let g = legacyGroups.find((x) => x.key === key);
     if (!g) {
