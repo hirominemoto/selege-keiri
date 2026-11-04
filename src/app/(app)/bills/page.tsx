@@ -89,6 +89,9 @@ export default async function BillsPage({
   // 郵送でまだ送っていないもの（請求書を作って、まだ「送った」を押していない）。南條さんが印刷して投函する分
   const isPostUnsent = (r: (typeof rows)[number]) => r.send_method === "post" && r.status === "issued";
   const postUnsent = rows.filter(isPostUnsent).length;
+  // 郵送で送った件数 ／ 郵送の請求書（請求書を作ったもの）の件数
+  const postIssued = rows.filter((r) => r.send_method === "post" && r.status !== "draft").length;
+  const postSent = rows.filter((r) => r.send_method === "post" && r.status === "sent").length;
   const onlyPost = show === "post-unsent" && !company;
   const shown = onlyPost ? rows.filter(isPostUnsent) : rows;
   const monthQ = `month=${m.slice(0, 7)}`;
@@ -148,8 +151,14 @@ export default async function BillsPage({
             href={onlyPost ? `/bills?${monthQ}` : `/bills?${monthQ}&show=post-unsent`}
             className={`chip-link${onlyPost ? " chip-link-on" : ""}`}
           >
-            郵送でまだ送っていない<strong>{postUnsent}件</strong>
-            {onlyPost && <span className="chip-x">（すべて表示に戻す）</span>}
+            郵送で送った<strong>
+              {postSent}件／{postIssued}件
+            </strong>
+            {onlyPost ? (
+              <span className="chip-x">（まだの{postUnsent}件だけ表示中。押すとすべて表示）</span>
+            ) : (
+              postUnsent > 0 && <span className="chip-x">（押すと、まだの{postUnsent}件だけ表示）</span>
+            )}
           </Link>
         )}
         <span>
