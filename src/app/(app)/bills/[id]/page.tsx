@@ -9,6 +9,9 @@ import { createClient } from "@/lib/supabase/server";
 import { deleteBill, issueBill, markBillSent, reopenBill } from "../actions";
 import { ExcelRowsPreview } from "@/components/ExcelRowsPreview";
 import { excelRowsForBill } from "@/lib/excelRows";
+import { unmarkExcelWritten } from "@/app/(app)/excel/actions";
+
+const EXCEL_BOOK_LABEL = { sales: "売上表", ledger: "収支一覧", company: "企業シート" } as const;
 
 export default async function BillPage({
   params,
@@ -52,8 +55,12 @@ export default async function BillPage({
   const isDraft = bill.status === "draft";
   // 一度でも送ったか（線を引くのは「送った」。送る前は自由に直せて消せる。11/04 ひろみ決定）
   const everSent = bill.status === "sent" || revisions.some((r) => r.status === "sent");
-  const { data: writeRows } = await supabase.from("bill_excel_writes").select("book").eq("bill_id", id);
-  const excelWritten = (writeRows ?? []).length > 0;
+  const { data: writeRows } = await supabase
+    .from("bill_excel_writes")
+    .select("book, sheet, first_row, last_row")
+    .eq("bill_id", id);
+  const excelWrites = (writeRows ?? []) as { book: "sales" | "ledger" | "company"; sheet: string; first_row: number; last_row: number }[];
+  const excelWritten = excelWrites.length > 0;
   const { data: sheetRow } = await supabase
     .from("legacy_sheet_rows")
     .select("sheet_name")
@@ -318,9 +325,28 @@ export default async function BillPage({
         <div className="card">
           <h2>この請求を消す</h2>
           {excelWritten ? (
-            <p className="muted">
-              Excelに記入済みなので、ここでは消せません。先に「<Link href={`/excel?month=${bill.accounting_month.slice(0, 7)}`}>Excelへの記入</Link>」で記入を取り消し、Excelの行も消してください。
-            </p>
+            <>
+              <p className="muted">
+                Excelに記入済みなので、まだ消せません。Excelの行を手で消してから、下の「記入を取り消す」を押してください。取り消すと消せるようになります。
+              </p>
+              <ul className="excel-written-list">
+                {excelWrites.map((w) => (
+                  <li key={w.book}>
+                    {EXCEL_BOOK_LABEL[w.book]}「{w.sheet}」{w.first_row}
+                    {w.last_row !== w.first_row && `〜${w.last_row}`}行目{" "}
+                    <form action={unmarkExcelWritten} style={{ display: "inline" }}>
+                      <input type="hidden" name="bill_id" value={bill.id} />
+                      <input type="hidden" name="book" value={w.book} />
+                      <ConfirmButton
+                        message={`${EXCEL_BOOK_LABEL[w.book]}の「記入済み」を取り消します。Excelの行は消えません（手で消してください）。よろしいですか？`}
+                      >
+                        記入を取り消す
+                      </ConfirmButton>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : (
             <>
               <p className="muted">
