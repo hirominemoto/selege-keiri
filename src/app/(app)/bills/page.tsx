@@ -44,6 +44,26 @@ export default async function BillsPage({
     supabase.from("app_settings").select("key, value").in("key", ["tax_rate", "tax_rounding"]),
     company ? supabase.from("companies").select("id, name").eq("id", company).maybeSingle() : Promise.resolve({ data: null }),
   ]);
+  // 10/31 までの請求（企業シートから取り込んだ行）。請求書・企業ごとに、請求日でまとめて出す（見るだけ）
+  let legacyQuery = supabase
+    .from("legacy_sheet_rows")
+    .select("company_id, issue_date, description, amount, row_no, companies(name)");
+  legacyQuery = company
+    ? legacyQuery.eq("company_id", company).order("issue_date", { ascending: false })
+    : legacyQuery.eq("accounting_month", m).order("issue_date");
+  const { data: legacyData } = await legacyQuery.order("row_no");
+  type LegacyRow = { company_id: string; issue_date: string; description: string; amount: number; companies: { name: string } | null };
+  const legacyGroups: { key: string; issue_date: string; company: string; lines: string[]; amount: number }[] = [];
+  for (const r of (legacyData ?? []) as unknown as LegacyRow[]) {
+    const key = `${r.company_id}|${r.issue_date}`;
+    let g = legacyGroups.find((x) => x.key === key);
+    if (!g) {
+      g = { key, issue_date: r.issue_date, company: r.companies?.name ?? "—", lines: [], amount: 0 };
+      legacyGroups.push(g);
+    }
+    g.lines.push(r.description);
+    g.amount += r.amount;
+  }
   const settings = new Map((settingData ?? []).map((s) => [s.key as string, s.value]));
   const taxRate = Number(settings.get("tax_rate") ?? 0.1);
   const taxRounding = (settings.get("tax_rounding") ?? "ceil") as TaxRounding;
@@ -124,7 +144,7 @@ export default async function BillsPage({
         </span>
       </div>
 
-      {shown.length === 0 ? (
+      {shown.length === 0 && !onlyPost && legacyGroups.length > 0 ? null : shown.length === 0 ? (
         <p className="empty">
           {onlyPost
             ? "郵送でまだ送っていない請求書はありません。"
@@ -166,6 +186,40 @@ export default async function BillsPage({
             </tbody>
           </table>
         </div>
+      )}
+
+      {!onlyPost && legacyGroups.length > 0 && (
+        <>
+          <h2 style={{ marginTop: 32 }}>企業シートから取り込んだ請求（10/31 まで・請求済み）</h2>
+          <p className="muted small">
+            アプリを使い始める前に、Excel（企業シート）で請求したものです。見るだけで、ここからは直せません。金額は税抜の合計です。
+          </p>
+          <div className="table-wrap card">
+            <table>
+              <thead>
+                <tr>
+                  <th>請求日</th>
+                  <th>企業</th>
+                  <th>内訳</th>
+                  <th className="num">金額（税抜）</th>
+                </tr>
+              </thead>
+              <tbody>
+                {legacyGroups.map((g) => (
+                  <tr key={g.key}>
+                    <td>{dateLabel(g.issue_date)}</td>
+                    <td>{g.company}</td>
+                    <td>
+                      {g.lines[0]}
+                      {g.lines.length > 1 && <span className="muted">　ほか{g.lines.length - 1}行</span>}
+                    </td>
+                    <td className="num">{yen(g.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </main>
   );
