@@ -839,7 +839,8 @@ await test("請求の入力：請求書を作ったあとは、直すことも�
   await rejects(`select public.bill_save($1, $2, $3::jsonb, $4::jsonb)`,
     [id, v, JSON.stringify(billHead()), JSON.stringify([{ description: "x", unit_price: 1, quantity: 1 }])], /作り直す/);
   await rejects(`update public.bill_lines set unit_price = 1 where bill_id = $1`, [id], /作り直す/);
-  await rejects(`select public.bill_delete_draft($1)`, [id], /消せません/);
+  // 直接は消せない（消すのは bill_delete_draft から）
+  await rejects(`delete from public.bills where id = $1`, [id], /消せません/);
 });
 
 await test("請求の入力：入力中の請求は明細ごと消せる", async () => {
@@ -997,7 +998,7 @@ await test("作り直す：作り直し中の請求は消せない・企業を�
   await rejects(`select public.bill_reopen($1, '理由')`, [id], /管理者だけ/);
   await as(U1);
   await db.query(`select public.bill_reopen($1, '理由')`, [id]);
-  await rejects(`select public.bill_delete_draft($1)`, [id], /作り直し中/);
+  await rejects(`delete from public.bills where id = $1`, [id], /作り直し中/);
   await rejects(`update public.bills set invoice_no = '9999-99' where id = $1`, [id], /番号は直接/);
   await rejects(`update public.bills set company_id = $2 where id = $1`, [id, emailCompanyId], /企業を変えられません/);
 });
@@ -1016,10 +1017,55 @@ await test("作り直す：アプリと同じ authenticated の役割（RLS あ�
     const r = await one(`select status, invoice_no from public.bill_reopen($1, 'RLS の確認')`, [id]);
     assert.equal(r.status, "draft");
     await rejects(`insert into public.bill_revisions (bill_id, revision, reason, snapshot) values ($1, 99, 'x', '{}')`, [id], /row-level security/);
+    // 送る前なら、前の版ごと消せる（RLS ありでも）
+    await db.query(`select public.bill_delete_draft($1)`, [id]);
   } finally {
     await db.exec(`reset role`);
   }
-  assert.equal((await all(`select 1 from public.bill_revisions where bill_id = $1`, [id])).length, 1);
+  assert.equal((await all(`select 1 from public.bill_revisions where bill_id = $1`, [id])).length, 0);
+  assert.equal((await all(`select 1 from public.bills where id = $1`, [id])).length, 0);
+});
+
+// ---- 送る前は自由に直せて消せる（0011） ----
+await test("送る前：作り直すのに理由はいらない。請求書を作ったあとでも消せて、前の版も消える", async () => {
+  await as(U1);
+  const id = (await saveBill(null, null, billHead(), [{ description: "送る前のテスト", unit_price: 1000, quantity: 1 }])).id;
+  await issue(id);
+  const r = await one(`select * from public.bill_reopen($1, '')`, [id]);
+  assert.equal(r.status, "draft");
+  assert.equal((await one(`select reason from public.bill_revisions where bill_id = $1`, [id])).reason, "送る前の直し");
+  await issue(id);
+  await db.query(`select public.bill_delete_draft($1)`, [id]);
+  assert.equal((await all(`select 1 from public.bills where id = $1`, [id])).length, 0);
+  assert.equal((await all(`select 1 from public.bill_revisions where bill_id = $1`, [id])).length, 0);
+  assert.equal((await all(`select 1 from public.bill_lines where bill_id = $1`, [id])).length, 0);
+});
+
+await test("送ったあと：作り直すには理由が要り、作り直し中になっても消せない", async () => {
+  await as(U1);
+  const id = (await saveBill(null, null, billHead(), [{ description: "送ったあとのテスト", unit_price: 1000, quantity: 1 }])).id;
+  await issue(id);
+  await db.query(`select public.bill_mark_sent($1, '2026-11-30', 'email')`, [id]);
+  await rejects(`select public.bill_delete_draft($1)`, [id], /送った請求書は消せません/);
+  await rejects(`select public.bill_reopen($1, '')`, [id], /理由を入れて/);
+  await db.query(`select public.bill_reopen($1, '金額の誤り')`, [id]);
+  // 作り直し中（入力中）でも、前に送っているので消せない
+  await rejects(`select public.bill_delete_draft($1)`, [id], /送った請求書は消せません/);
+  // 作り直したあと、送る前のもう一度の作り直しでも理由が要る（前に送っているため）
+  await issue(id);
+  await rejects(`select public.bill_reopen($1, '')`, [id], /理由を入れて/);
+});
+
+await test("Excelに記入済みの請求は、送る前でも消せない。記入を取り消せば消せる", async () => {
+  await as(U1);
+  const id = (await saveBill(null, null, billHead(), [{ description: "記入済みのテスト", unit_price: 1000, quantity: 1 }])).id;
+  const b = await issue(id);
+  await db.query(`select public.bill_excel_mark('sales', null, $1::jsonb)`,
+    [JSON.stringify([{ bill_id: id, issued_at: b.issued_at, sheet: "11月", first_row: 9, last_row: 9 }])]);
+  await rejects(`select public.bill_delete_draft($1)`, [id], /Excelに記入済み/);
+  await db.query(`select public.bill_excel_unmark($1, 'sales')`, [id]);
+  await db.query(`select public.bill_delete_draft($1)`, [id]);
+  assert.equal((await all(`select 1 from public.bills where id = $1`, [id])).length, 0);
 });
 
 // ---- 企業シートの取り込み（0006） ----
