@@ -470,6 +470,27 @@ textarea {
   font-size: 14px;
   color: var(--ink-soft);
 }
+.summary-chips .chip-link {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 14px;
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+.summary-chips .chip-link:hover {
+  border-color: var(--ink-soft);
+}
+.summary-chips .chip-link-on {
+  border-color: var(--accent, #1f6f5c);
+  color: var(--ink);
+  font-weight: 600;
+}
+.summary-chips .chip-x {
+  margin-left: 6px;
+  font-weight: 400;
+}
 .summary-chips strong {
   color: var(--ink);
   margin-left: 4px;

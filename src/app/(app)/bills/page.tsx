@@ -25,9 +25,9 @@ type Row = {
 export default async function BillsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; deleted?: string; company?: string }>;
+  searchParams: Promise<{ month?: string; deleted?: string; company?: string; show?: string }>;
 }) {
-  const { month, deleted, company } = await searchParams;
+  const { month, deleted, company, show } = await searchParams;
   const user = await requireUser();
   const m = parseMonth(month) ?? currentMonthJst();
   const supabase = await createClient();
@@ -44,6 +44,39 @@ export default async function BillsPage({
     supabase.from("app_settings").select("key, value").in("key", ["tax_rate", "tax_rounding"]),
     company ? supabase.from("companies").select("id, name").eq("id", company).maybeSingle() : Promise.resolve({ data: null }),
   ]);
+  // 10/31 までの請求（企業シートから取り込んだ行）。請求書・企業ごとに、請求日でまとめて出す（見るだけ）
+  // 請求済みとみなすのは legacy_billed_until（10/31）までの行だけ（企業の履歴と同じ線引き）
+  const { data: cutoffRow } = await supabase.from("app_settings").select("value").eq("key", "legacy_billed_until").maybeSingle();
+  const billedUntil = typeof cutoffRow?.value === "string" ? cutoffRow.value : "2026-10-31";
+  // Supabase は1回に1000行までなので、分けて読む（並びを決めて、途中で切れないように）
+  const legacyData: unknown[] = [];
+  for (let from = 0; ; from += 1000) {
+    let q = supabase
+      .from("legacy_sheet_rows")
+      .select("id, company_id, issue_date, description, amount, row_no, companies(name)")
+      .lte("issue_date", billedUntil);
+    q = company ? q.eq("company_id", company) : q.eq("accounting_month", m);
+    const { data } = await q
+      .order("issue_date", { ascending: !company })
+      .order("company_id")
+      .order("row_no")
+      .order("id")
+      .range(from, from + 999);
+    legacyData.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  type LegacyRow = { company_id: string; issue_date: string; description: string; amount: number; companies: { name: string } | null };
+  const legacyGroups: { key: string; issue_date: string; company: string; lines: string[]; amount: number }[] = [];
+  for (const r of legacyData as LegacyRow[]) {
+    const key = `${r.company_id}|${r.issue_date}`;
+    let g = legacyGroups.find((x) => x.key === key);
+    if (!g) {
+      g = { key, issue_date: r.issue_date, company: r.companies?.name ?? "—", lines: [], amount: 0 };
+      legacyGroups.push(g);
+    }
+    g.lines.push(r.description);
+    g.amount += r.amount;
+  }
   const settings = new Map((settingData ?? []).map((s) => [s.key as string, s.value]));
   const taxRate = Number(settings.get("tax_rate") ?? 0.1);
   const taxRounding = (settings.get("tax_rounding") ?? "ceil") as TaxRounding;
@@ -53,6 +86,12 @@ export default async function BillsPage({
     totals: billTotals(r, r.bill_lines, taxRate, taxRounding),
   }));
   const drafts = rows.filter((r) => r.status === "draft").length;
+  // 郵送でまだ送っていないもの（請求書を作って、まだ「送った」を押していない）。南條さんが印刷して投函する分
+  const isPostUnsent = (r: (typeof rows)[number]) => r.send_method === "post" && r.status === "issued";
+  const postUnsent = rows.filter(isPostUnsent).length;
+  const onlyPost = show === "post-unsent" && !company;
+  const shown = onlyPost ? rows.filter(isPostUnsent) : rows;
+  const monthQ = `month=${m.slice(0, 7)}`;
   const sum = rows.reduce((s, r) => s + r.totals.total, 0);
 
   return (
@@ -104,13 +143,28 @@ export default async function BillsPage({
         <span>
           アプリに入力済み（請求書はまだ）<strong>{drafts}件</strong>
         </span>
+        {!companyRow && (
+          <Link
+            href={onlyPost ? `/bills?${monthQ}` : `/bills?${monthQ}&show=post-unsent`}
+            className={`chip-link${onlyPost ? " chip-link-on" : ""}`}
+          >
+            郵送でまだ送っていない<strong>{postUnsent}件</strong>
+            {onlyPost && <span className="chip-x">（すべて表示に戻す）</span>}
+          </Link>
+        )}
         <span>
           合計（税込）<strong>{yen(sum)}</strong>
         </span>
       </div>
 
-      {rows.length === 0 ? (
-        <p className="empty">{companyRow ? "この企業の請求はまだありません。" : "この月の請求はまだありません。"}</p>
+      {shown.length === 0 && !onlyPost && legacyGroups.length > 0 ? null : shown.length === 0 ? (
+        <p className="empty">
+          {onlyPost
+            ? "郵送でまだ送っていない請求書はありません。"
+            : companyRow
+              ? "この企業の請求はまだありません。"
+              : "この月の請求はまだありません。"}
+        </p>
       ) : (
         <div className="table-wrap card">
           <table>
@@ -125,7 +179,7 @@ export default async function BillsPage({
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {shown.map((r) => (
                 <tr key={r.id}>
                   <td>{dateLabel(r.issue_date)}</td>
                   <td>
@@ -145,6 +199,40 @@ export default async function BillsPage({
             </tbody>
           </table>
         </div>
+      )}
+
+      {!onlyPost && legacyGroups.length > 0 && (
+        <>
+          <h2 style={{ marginTop: 32 }}>企業シートから取り込んだ請求（10/31 まで・請求済み）</h2>
+          <p className="muted small">
+            アプリを使い始める前に、Excel（企業シート）で請求したものです。見るだけで、ここからは直せません。金額は税抜の合計です。
+          </p>
+          <div className="table-wrap card">
+            <table>
+              <thead>
+                <tr>
+                  <th>請求日</th>
+                  <th>企業</th>
+                  <th>内訳</th>
+                  <th className="num">金額（税抜）</th>
+                </tr>
+              </thead>
+              <tbody>
+                {legacyGroups.map((g) => (
+                  <tr key={g.key}>
+                    <td>{dateLabel(g.issue_date)}</td>
+                    <td>{g.company}</td>
+                    <td>
+                      {g.lines[0]}
+                      {g.lines.length > 1 && <span className="muted">　ほか{g.lines.length - 1}行</span>}
+                    </td>
+                    <td className="num">{yen(g.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </main>
   );

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PrintButton } from "@/components/InvoiceDraftForms";
@@ -6,6 +7,31 @@ import { requireUser } from "@/lib/auth";
 import type { Issuer, TaxRounding, Totals } from "@/lib/billing";
 import { billStatusText, type Bill, type BillLine } from "@/lib/bills";
 import { createClient } from "@/lib/supabase/server";
+
+/**
+ * ページの名前 ＝ PDFに保存するときの初めのファイル名（11/04 ひろみ決定）
+ *   「番号_企業名御中_御請求書」。番号がまだない下書きは「下書き_…」
+ */
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("bills")
+    .select("invoice_no, bill_to_name, honorific, companies(name, honorific)")
+    .eq("id", id)
+    .maybeSingle();
+  if (!data) return { title: "請求書" };
+  const b = data as unknown as {
+    invoice_no: string | null;
+    bill_to_name: string | null;
+    honorific: string | null;
+    companies: { name: string; honorific: string | null } | null;
+  };
+  const name = b.bill_to_name ?? b.companies?.name ?? "";
+  const honorific = b.honorific ?? b.companies?.honorific ?? "御中";
+  const fileName = `${b.invoice_no ?? "下書き"}_${name}${honorific}_御請求書`.replace(/[\\/:*?"<>|]/g, "");
+  return { title: { absolute: fileName } };
+}
 
 /**
  * 請求書（A4・1枚）。印刷・PDF保存もこの画面から。
