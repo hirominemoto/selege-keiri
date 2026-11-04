@@ -10,23 +10,16 @@ const menus = [
   },
   {
     num: "2",
-    title: "Excelに書き込む",
-    desc: "入力した請求を、企業シート・売上表・収支一覧に書き込みます",
+    title: "Excelへの記入",
+    desc: "請求書を作った請求を、売上表・収支一覧に書き足します（企業シートは準備中）",
     href: "/excel",
-    ready: false,
+    ready: true,
   },
   {
     num: "3",
     title: "企業・契約",
     desc: "取引先の宛名と、契約ごとの金額・回数を登録します",
     href: "/companies",
-    ready: true,
-  },
-  {
-    num: "4",
-    title: "請求状況（お試し版）",
-    desc: "契約ごとに、どの月まで請求したかを確かめます",
-    href: "/billing",
     ready: true,
   },
 ];

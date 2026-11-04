@@ -151,7 +151,7 @@ export default async function BillsPage({
             href={onlyPost ? `/bills?${monthQ}` : `/bills?${monthQ}&show=post-unsent`}
             className={`chip-link${onlyPost ? " chip-link-on" : ""}`}
           >
-            郵送で送った<strong>
+            郵送した件数<strong>
               {postSent}件／{postIssued}件
             </strong>
             {onlyPost ? (
