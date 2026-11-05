@@ -122,8 +122,17 @@ export default async function BillsPage({
           </p>
         </div>
         {user.role === "admin" && (
-          <Link href={companyRow ? `/bills/new?company=${companyRow.id}` : "/bills/new"} className="btn">
-            ＋ 新しい請求を入力
+          <Link
+            href={
+              companyRow
+                ? `/bills/new?company=${companyRow.id}`
+                : !unsentMode && m !== currentMonthJst()
+                  ? `/bills/new?month=${m.slice(0, 7)}`
+                  : "/bills/new"
+            }
+            className="btn"
+          >
+            {!companyRow && !unsentMode && m !== currentMonthJst() ? `＋ ${monthLabel(m)}計上で入力` : "＋ 新しい請求を入力"}
           </Link>
         )}
       </div>
