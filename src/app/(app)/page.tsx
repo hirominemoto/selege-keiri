@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { UnsentNotice } from "@/components/UnsentNotice";
 
 const menus = [
   {
@@ -33,6 +34,7 @@ export default function HomePage() {
           <p className="lead">やりたいことを選んでください</p>
         </div>
       </div>
+      <UnsentNotice />
       <div className="menu-grid">
         {menus.map((m) =>
           m.ready ? (
