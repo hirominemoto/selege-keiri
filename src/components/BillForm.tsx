@@ -59,6 +59,7 @@ export function BillForm(props: {
   contractsByCompany: Record<string, ContractState[]>;
   history: Record<string, HistoryEntry[]>;
   initialCompanyId?: string; // 企業のページから来たとき
+  initialMonth?: string; // 前の月などの一覧から来たとき（"2026-10"）。計上月をその月で始める
   taxRate: number;
   taxRounding: TaxRounding;
   today: string;
@@ -73,8 +74,9 @@ export function BillForm(props: {
   const [companyId, setCompanyId] = useState(initialCompany);
   const startCompany = props.companies.find((c) => c.id === initialCompany);
   const [issueDate, setIssueDate] = useState(b?.issue_date ?? props.today);
-  const [month, setMonth] = useState((b?.accounting_month ?? props.today).slice(0, 7));
-  const [monthTouched, setMonthTouched] = useState(!!b);
+  const [month, setMonth] = useState((b?.accounting_month ?? props.initialMonth ?? props.today).slice(0, 7));
+  // 一覧の月から来たときは、請求日を変えても計上月は動かさない（手で選んだのと同じ扱い）
+  const [monthTouched, setMonthTouched] = useState(!!b || !!props.initialMonth);
   const [due, setDue] = useState(
     b?.payment_due_date ??
       (startCompany ? defaultDueDate(props.today, startCompany.payment_due_months, startCompany.payment_due_day) : ""),
@@ -96,7 +98,7 @@ export function BillForm(props: {
           service_month: l.service_month ?? "",
         }))
       : initialCompany
-        ? contractLines(props.contractsByCompany[initialCompany] ?? [], `${props.today.slice(0, 7)}-01`)
+        ? contractLines(props.contractsByCompany[initialCompany] ?? [], `${(props.initialMonth ?? props.today).slice(0, 7)}-01`)
         : [emptyLine("first")],
   );
   const added = useRef(0);
@@ -246,7 +248,11 @@ export function BillForm(props: {
               }}
             />
           </Field>
-          <Field label="計上月" name="accounting_month" required error={e.accounting_month} hint="初めは請求日の月。売上表のどの月のシートに書くかもこれで決まります">
+          <Field label="計上月" name="accounting_month" required error={e.accounting_month} hint={
+            !b && props.initialMonth && month === props.initialMonth
+              ? `${Number(month.slice(5, 7))}月の一覧から開いたので、計上月は${Number(month.slice(5, 7))}月です。売上表のどの月のシートに書くかもこれで決まります`
+              : "初めは請求日の月。売上表のどの月のシートに書くかもこれで決まります"
+          }>
             <input
               id="accounting_month"
               name="accounting_month"

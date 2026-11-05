@@ -5,10 +5,12 @@ import { billStatusText, billTotals, type BillStatus } from "@/lib/bills";
 import { currentMonthJst } from "@/lib/dates";
 import { dateLabel, monthLabel, sendMethodLabel, yen } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
+import { UnsentNotice } from "@/components/UnsentNotice";
 
 type Row = {
   id: string;
   issue_date: string;
+  accounting_month: string;
   status: BillStatus;
   invoice_no: string | null;
   sent_on: string | null;
@@ -32,13 +34,16 @@ export default async function BillsPage({
   const m = parseMonth(month) ?? currentMonthJst();
   const supabase = await createClient();
 
-  // 企業のページから来たときは、その企業の請求を全部の月で出す
+  // まだ送っていない請求（請求書作成済み）を、すべての月で出す。企業のページから来たときは、その企業の請求を全部の月で出す
+  const unsentMode = show === "unsent" && !company;
   let query = supabase
     .from("bills")
-    .select("id, issue_date, status, invoice_no, sent_on, send_method, staff_name, subtotal_taxable, subtotal_nontaxable, tax_amount, total, companies(name), bill_lines(description, amount, taxable, sort)");
-  query = company
-    ? query.eq("company_id", company).order("issue_date", { ascending: false })
-    : query.eq("accounting_month", m).order("issue_date");
+    .select("id, issue_date, accounting_month, status, invoice_no, sent_on, send_method, staff_name, subtotal_taxable, subtotal_nontaxable, tax_amount, total, companies(name), bill_lines(description, amount, taxable, sort)");
+  query = unsentMode
+    ? query.eq("status", "issued").order("accounting_month").order("issue_date")
+    : company
+      ? query.eq("company_id", company).order("issue_date", { ascending: false })
+      : query.eq("accounting_month", m).order("issue_date");
   const [{ data, error }, { data: settingData }, { data: companyRow }] = await Promise.all([
     query.order("created_at"),
     supabase.from("app_settings").select("key, value").in("key", ["tax_rate", "tax_rounding"]),
@@ -50,7 +55,7 @@ export default async function BillsPage({
   const billedUntil = typeof cutoffRow?.value === "string" ? cutoffRow.value : "2026-10-31";
   // Supabase は1回に1000行までなので、分けて読む（並びを決めて、途中で切れないように）
   const legacyData: unknown[] = [];
-  for (let from = 0; ; from += 1000) {
+  for (let from = 0; !unsentMode; from += 1000) {
     let q = supabase
       .from("legacy_sheet_rows")
       .select("id, company_id, issue_date, description, amount, row_no, companies(name)")
@@ -101,9 +106,13 @@ export default async function BillsPage({
     <main className="page">
       <div className="page-head">
         <div>
-          <h1>{companyRow ? `${companyRow.name}の請求` : "請求の入力"}</h1>
+          <h1>{companyRow ? `${companyRow.name}の請求` : unsentMode ? "まだ送っていない請求" : "請求の入力"}</h1>
           <p className="lead">
-            {companyRow ? (
+            {unsentMode ? (
+              <>
+                請求書を作って、まだ「送った」を押していない請求です（すべての月）。<Link href="/bills">請求の入力へ戻る</Link>
+              </>
+            ) : companyRow ? (
               <>
                 すべての月の請求。<Link href={`/companies/${companyRow.id}`}>企業のページへ戻る</Link>
               </>
@@ -113,13 +122,22 @@ export default async function BillsPage({
           </p>
         </div>
         {user.role === "admin" && (
-          <Link href={companyRow ? `/bills/new?company=${companyRow.id}` : "/bills/new"} className="btn">
-            ＋ 新しい請求を入力
+          <Link
+            href={
+              companyRow
+                ? `/bills/new?company=${companyRow.id}`
+                : !unsentMode && m !== currentMonthJst()
+                  ? `/bills/new?month=${m.slice(0, 7)}`
+                  : "/bills/new"
+            }
+            className="btn"
+          >
+            {!companyRow && !unsentMode && m !== currentMonthJst() ? `＋ ${monthLabel(m)}計上で入力` : "＋ 新しい請求を入力"}
           </Link>
         )}
       </div>
 
-      {!companyRow && (
+      {!companyRow && !unsentMode && (
       <div className="month-nav">
         <Link href={`/bills?month=${addMonths(m, -1).slice(0, 7)}`} className="btn btn-secondary">
           ← 前の月
@@ -136,9 +154,12 @@ export default async function BillsPage({
       </div>
       )}
 
+      {!companyRow && !unsentMode && <UnsentNotice />}
+
       {deleted && <p className="notice notice-info">請求を消しました。</p>}
       {error && <p className="notice notice-error">読み込めませんでした（{error.message}）</p>}
 
+      {!unsentMode && (
       <div className="summary-chips">
         <span>
           {companyRow ? "請求" : `${monthLabel(m)}の請求`}<strong>{rows.length}件</strong>
@@ -165,10 +186,13 @@ export default async function BillsPage({
           合計（税込）<strong>{yen(sum)}</strong>
         </span>
       </div>
+      )}
 
       {shown.length === 0 && !onlyPost && legacyGroups.length > 0 ? null : shown.length === 0 ? (
         <p className="empty">
-          {onlyPost
+          {unsentMode
+            ? "まだ送っていない請求はありません。"
+            : onlyPost
             ? "郵送でまだ送っていない請求書はありません。"
             : companyRow
               ? "この企業の請求はまだありません。"
@@ -179,6 +203,7 @@ export default async function BillsPage({
           <table>
             <thead>
               <tr>
+                {unsentMode && <th>計上月</th>}
                 <th>請求日</th>
                 <th>企業</th>
                 <th>内訳</th>
@@ -190,6 +215,7 @@ export default async function BillsPage({
             <tbody>
               {shown.map((r) => (
                 <tr key={r.id}>
+                  {unsentMode && <td>{monthLabel(r.accounting_month)}</td>}
                   <td>{dateLabel(r.issue_date)}</td>
                   <td>
                     <Link href={`/bills/${r.id}`}>{r.companies?.name ?? "—"}</Link>
@@ -210,7 +236,7 @@ export default async function BillsPage({
         </div>
       )}
 
-      {!onlyPost && legacyGroups.length > 0 && (
+      {!onlyPost && !unsentMode && legacyGroups.length > 0 && (
         <>
           <h2 style={{ marginTop: 32 }}>企業シートから取り込んだ請求（10/31 まで・請求済み）</h2>
           <p className="muted small">

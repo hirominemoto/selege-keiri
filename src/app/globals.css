@@ -382,6 +382,30 @@ textarea {
   color: var(--accent);
 }
 
+/* まだ送っていない請求（ホームと請求の入力のいちばん上） */
+.unsent-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 16px 0;
+  font-size: 15px;
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+.unsent-notice:hover {
+  border-color: var(--warn);
+}
+.unsent-notice strong {
+  font-size: 17px;
+  margin: 0 2px;
+}
+.unsent-notice .unsent-more {
+  margin-left: auto;
+  font-size: 13px;
+  text-decoration: underline;
+}
+
 .badge {
   display: inline-block;
   font-size: 12px;
