@@ -268,6 +268,9 @@ await test("企業シート：新しいシートの名前は、使えない文�
   assert.equal(newSheetName("サンプル/合同会社", []), "サンプル合同会社");
   assert.equal(newSheetName("テスト工業", ["テスト工業"]), "テスト工業2");
   assert.equal(newSheetName("あ".repeat(40), []).length, 31);
+  assert.equal(newSheetName("/ 'Acme", []), "Acme"); // 前の「'」や空白は外す（止まらなくならない）
+  assert.equal(newSheetName("' ' /", []), "新しい企業");
+  assert.equal(newSheetName("Acme", ["Acme"]), "Acme2");
 });
 
 await test("企業シート：似た名前の新しい企業のシートに、今ある企業の請求を入れない", async () => {

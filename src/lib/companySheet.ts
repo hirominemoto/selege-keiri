@@ -204,12 +204,23 @@ export function chooseTemplateSheet(sheets: SheetData[]): SheetData | null {
 /** 新しいシートの名前：企業名（シート名に使えない文字は除き、31文字まで）。同じ名前があれば末尾に 2, 3… */
 export function newSheetName(companyName: string, existing: Iterable<string>): string {
   const taken = new Set([...existing].map((n) => n.toLowerCase()));
-  const base = companyName.replace(/[:\\/?*[\]]/g, "").replace(/^'+|'+$/g, "").trim().slice(0, 31) || "新しい企業";
-  let name = base;
-  for (let i = 2; taken.has(name.toLowerCase()) || !isValidSheetName(name); i++) {
-    name = `${base.slice(0, 31 - String(i).length)}${i}`;
+  // 使えない文字を除き、前後の空白と「'」を外す（外したあとにまた空白が前後に出ることがあるので、くり返す）
+  const clean = (x: string) => {
+    let t = x.replace(/[:\\/?*[\]]/g, "");
+    for (let prev = ""; prev !== t; ) {
+      prev = t;
+      t = t.trim().replace(/^'+|'+$/g, "");
+    }
+    return t;
+  };
+  const base = clean(clean(companyName).slice(0, 31)) || "新しい企業";
+  if (!taken.has(base.toLowerCase()) && isValidSheetName(base)) return base;
+  for (let i = 2; i < 1000; i++) {
+    const head = clean(base.slice(0, 31 - String(i).length)) || "企業";
+    const name = `${head}${i}`;
+    if (!taken.has(name.toLowerCase()) && isValidSheetName(name)) return name;
   }
-  return name;
+  throw new Error(`「${companyName}」の新しいシートの名前を決められませんでした`);
 }
 
 /**
