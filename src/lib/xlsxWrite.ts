@@ -7,18 +7,25 @@
  *   - セルの書式は、同じ列で、上にある同じ種類（数字／文字）の値のセルにそろえる（日付が数字のまま出ないように）
  *   - 文字はセルに直接書く（共有文字列の表は触らない）。式・日付も書ける
  *   - 式の計算は、Excel で開いたときに計算し直す（calcChain は消し、開いたときに全部計算する印を付ける）
+ *   - 企業シートのように、空いている行に前もって式（=D×E）が入っているシートは、その式をそのまま使う（fix）
  * 外部のライブラリは使わない：zip はブラウザ標準の CompressionStream / DecompressionStream で読み書きする
  */
 
-export type WriteValue = string | number | { date: string } | { formula: string } | null;
+/**
+ * 書く値。式の中の「{r}」は、書く行の番号に置きかえる（例 "D{r}*E{r}"）
+ * fix：そのセルにもう式があれば、同じ式（または共有の式）ならそのまま残し、違う式なら正しい式に直す
+ */
+export type WriteValue = string | number | { date: string } | { formula: string; fix?: boolean } | null;
 /** 1行ぶん：列（"A"…）→ 書く値。null や書かない列は今のまま */
 export type WriteRow = Record<string, WriteValue>;
 export type SheetEdit = {
   sheet: string;
   /** この行より下に書く（見出しの行の次） */
   startRow: number;
-  /** この列が空いている行を「空いている行」とみなす */
-  keyCol: string;
+  /** この列（複数なら、そのどれか）に値がある、いちばん下の行の次から書く */
+  keyCol: string | string[];
+  /** この行（例：「売上合計」の行）より上に収まらなければ、書かずにやめる */
+  beforeRow?: number;
   rows: WriteRow[];
 };
 export type SheetWritten = { sheet: string; firstRow: number; lastRow: number };
@@ -256,16 +263,18 @@ export function appendToSheetXml(xml: string, edit: Omit<SheetEdit, "sheet">): {
     rows.push({ r, open: `<row${m[1]}`, cells: m[2] === "/>" ? [] : parseCells(m[3] ?? ""), selfClosing: m[2] === "/>" });
   }
   const byR = new Map(rows.map((r) => [r.r, r]));
-  const key = colNumber(edit.keyCol);
+  const keys = (Array.isArray(edit.keyCol) ? edit.keyCol : [edit.keyCol]).map(colNumber);
 
   // キーの列が空いている、いちばん上の行（その下もすべて空いている前提ではなく、最後に値がある行の次）
   let lastUsed = edit.startRow - 1;
   for (const row of rows) {
     if (row.r < edit.startRow) continue;
-    const c = row.cells.find((x) => x.col === key);
-    if (c && c.kind !== "empty") lastUsed = Math.max(lastUsed, row.r);
+    if (row.cells.some((x) => keys.includes(x.col) && x.kind !== "empty")) lastUsed = Math.max(lastUsed, row.r);
   }
   const firstRow = lastUsed + 1;
+  if (edit.beforeRow && firstRow + edit.rows.length - 1 >= edit.beforeRow) {
+    throw new Error(`${edit.beforeRow}行目より上に、空いている行が足りません（${firstRow}行目から${edit.rows.length}行）。書き込みをやめました`);
+  }
 
   // 書式を合わせる元：同じ列で、上にある同じ種類の値のセル
   const styleAbove = (col: number, kind: "num" | "str" | "formula", before: number): string | null => {
@@ -288,12 +297,20 @@ export function appendToSheetXml(xml: string, edit: Omit<SheetEdit, "sheet">): {
       byR.set(r, row);
       rows.push(row);
     }
-    for (const [col, v] of Object.entries(values)) {
-      if (v === null || v === undefined) continue;
+    for (const [col, raw] of Object.entries(values)) {
+      if (raw === null || raw === undefined) continue;
+      const v: Exclude<WriteValue, null> =
+        typeof raw === "object" && "formula" in raw ? { ...raw, formula: raw.formula.replace(/\{r\}/g, String(r)) } : raw;
       const n = colNumber(col);
       const existing = row.cells.find((c) => c.col === n);
       if (existing && existing.kind !== "empty") {
-        throw new Error(`${colLetters(n)}${r} にはもう値が入っています。書き込みをやめました`);
+        const fix = typeof v === "object" && "formula" in v && v.fix && existing.kind === "formula";
+        if (!fix) throw new Error(`${colLetters(n)}${r} にはもう値が入っています。書き込みをやめました`);
+        // 前もって入っている式：同じ式か、共有の式（下の行まで続けて入れた式）なら、そのまま使う
+        const f = existing.xml.match(/<f\b([^>]*?)(?:\/>|>([\s\S]*?)<\/f>)/);
+        const shared = /\st="shared"/.test(f?.[1] ?? "");
+        const same = unesc(f?.[2] ?? "").replace(/\s|\$/g, "") === v.formula.replace(/^=/, "").replace(/\s|\$/g, "");
+        if (shared || same) continue;
       }
       const kind = kindOf(v);
       const style =

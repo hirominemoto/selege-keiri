@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:db": "node tests/db.test.mjs",
-    "test:xlsx": "node --no-warnings tests/xlsx.test.mjs"
+    "test:xlsx": "node --no-warnings --import ./tests/ts-resolve.mjs tests/xlsx.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
