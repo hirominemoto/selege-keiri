@@ -49,7 +49,7 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
     sheet: companySheetName ?? bill.company_name,
     sheetNote: companySheetName
       ? "この企業のシートの、いちばん下の明細の次の行から足します"
-      : "企業シートを取り込んだときに、この企業のシートはありませんでした（ファイルに企業のシートがなければ、書きません）",
+      : "企業シートを取り込んだときに、この企業のシートはありませんでした（ファイルにもなければ、今あるシートと同じ形の新しいシートを足して書きます）",
     columns: [
       { col: "A", label: "請求日" },
       { col: "B", label: "クライアント名" },

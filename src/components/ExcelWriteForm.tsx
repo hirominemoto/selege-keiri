@@ -34,7 +34,8 @@ type Prepared = {
   ranges: SheetWritten[];
   items: WrittenItem[];
   inFile: ExcelWriteItem[]; // ファイルにもう書いてあったので、書かなかったもの
-  noSheet: ExcelWriteItem[]; // 企業シートに、その企業のシートがなかったもの
+  noSheet: ExcelWriteItem[]; // 企業シートに、その企業のシートがなく、足すこともできなかったもの
+  newSheets: string[]; // 企業シートに新しく足すシート
 };
 
 const rangeLabel = (w: SheetWritten, withSheet: boolean) =>
@@ -87,12 +88,17 @@ export function ExcelWriteForm(props: {
 
       if (props.book === "company") {
         if (!isCompanyBook) throw new Error("企業ごとのシートが見つかりません。企業シートのファイルを選んでください");
-        const { inFile, noSheet, plan } = planCompanySheets(sheets, notYet);
+        const { inFile, noSheet, newSheets, indexEdit, plan } = planCompanySheets(sheets, notYet);
         if (plan.length === 0) {
-          setPrepared({ fileName: file.name, data: buf, ranges: [], items: [], inFile, noSheet });
+          setPrepared({ fileName: file.name, data: buf, ranges: [], items: [], inFile, noSheet, newSheets: [] });
           return;
         }
-        const { data, written } = await appendRows(buf, plan.map((p) => p.edit));
+        const { data, written } = await appendRows(
+          buf,
+          // 目次は最後に（written の並びが plan と同じになるように）
+          [...plan.map((p) => p.edit), ...(indexEdit ? [indexEdit] : [])],
+          newSheets,
+        );
         const items: WrittenItem[] = plan.flatMap((p, k) => {
           let r = written[k].firstRow;
           return p.items.map(({ item, rowCount }) => {
@@ -101,7 +107,8 @@ export function ExcelWriteForm(props: {
             return it;
           });
         });
-        setPrepared({ fileName: file.name, data, ranges: written, items, inFile, noSheet });
+        // 目次に足した行は「請求を書いた行」ではないので、知らせには出さない
+        setPrepared({ fileName: file.name, data, ranges: written.slice(0, plan.length), items, inFile, noSheet, newSheets: newSheets.map((n) => n.name) });
         return;
       }
 
@@ -111,7 +118,7 @@ export function ExcelWriteForm(props: {
       const inFile = notYet.filter((i) => alreadyInSheet(target, i.marks));
       const toWrite = notYet.filter((i) => !inFile.includes(i));
       if (toWrite.length === 0) {
-        setPrepared({ fileName: file.name, data: buf, ranges: [], items: [], inFile, noSheet: [] });
+        setPrepared({ fileName: file.name, data: buf, ranges: [], items: [], inFile, noSheet: [], newSheets: [] });
         return;
       }
       const rows = toWrite.flatMap((i) => i.rows);
@@ -123,7 +130,7 @@ export function ExcelWriteForm(props: {
         r += i.rows.length;
         return it;
       });
-      setPrepared({ fileName: file.name, data, ranges: written, items, inFile, noSheet: [] });
+      setPrepared({ fileName: file.name, data, ranges: written, items, inFile, noSheet: [], newSheets: [] });
     } catch (e) {
       setError(e instanceof Error ? e.message : "ファイルを読めませんでした");
     } finally {
@@ -252,7 +259,12 @@ export function ExcelWriteForm(props: {
           )}
           {prepared.noSheet.length > 0 && (
             <p className="notice notice-warn">
-              企業シートに、この企業のシートが見つかりませんでした（{prepared.noSheet.map((i) => `${i.company} ${i.invoiceNo}`).join("、")}）。この請求は書きません。
+              企業シートに、この企業のシートが見つからず、新しいシートの元にできるシート（見出しがいつもの並びで「売上合計」の行があるもの）もありませんでした（{prepared.noSheet.map((i) => `${i.company} ${i.invoiceNo}`).join("、")}）。この請求は書きません。
+            </p>
+          )}
+          {prepared.newSheets.length > 0 && (
+            <p className="notice notice-info">
+              企業シートにまだシートがない企業があるので、新しいシート（{prepared.newSheets.map((n) => `「${n}」`).join("、")}）を足します。見出し・列の幅・合計の行は、今あるシートと同じ形です。目次シートのいちばん下にも、企業名とシートへのリンクを足します。シートの名前はあとで Excel で変えても大丈夫です。
             </p>
           )}
           {prepared.items.length > 0 ? (
