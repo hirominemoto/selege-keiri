@@ -26,6 +26,8 @@ export type SheetEdit = {
   keyCol: string | string[];
   /** この行（例：「売上合計」の行）より上に収まらなければ、書かずにやめる */
   beforeRow?: number;
+  /** 書いた行のセルに、ブックの中のシートへのリンクを付ける（rows と同じ順。例：目次の B に企業のシートへ） */
+  links?: ({ col: string; sheet: string } | null)[];
   rows: WriteRow[];
 };
 export type SheetWritten = { sheet: string; firstRow: number; lastRow: number };
@@ -400,6 +402,11 @@ export function appendToSheetXml(xml: string, edit: Omit<SheetEdit, "sheet">): {
   });
   const lastRow = firstRow + edit.rows.length - 1;
 
+  // シートへのリンク（ブックの中のリンクは location だけで、rels は要らない）
+  const links = (edit.links ?? [])
+    .map((l, i) => (l ? `<hyperlink ref="${l.col}${firstRow + i}" location="${esc(`'${l.sheet.replace(/'/g, "''")}'!A1`)}" display="${esc(l.sheet)}"/>` : ""))
+    .join("");
+
   rows.sort((a, b) => a.r - b.r);
   const newBody = rows
     .map((row) => (row.cells.length === 0 && row.selfClosing ? `${row.open}/>` : `${row.open}>${row.cells.map((c) => c.xml).join("")}</row>`))
@@ -413,6 +420,18 @@ export function appendToSheetXml(xml: string, edit: Omit<SheetEdit, "sheet">): {
     const endRow = Math.max(Number(r2 ?? r1), lastRow);
     return `<dimension ref="${c1}${r1}:${endCol}${endRow}"/>`;
   });
+  if (links) {
+    if (out.includes("</hyperlinks>")) {
+      out = out.replace("</hyperlinks>", `${links}</hyperlinks>`);
+    } else {
+      // hyperlinks は printOptions・pageMargins などより前に置く決まり
+      const m = out.match(
+        /<(printOptions|pageMargins|pageSetup|headerFooter|rowBreaks|colBreaks|customProperties|cellWatches|ignoredErrors|smartTags|drawing|legacyDrawing|legacyDrawingHF|picture|oleObjects|controls|mc:AlternateContent|webPublishItems|tableParts|extLst)\b/,
+      );
+      const at = m?.index ?? out.lastIndexOf("</worksheet>");
+      out = `${out.slice(0, at)}<hyperlinks>${links}</hyperlinks>${out.slice(at)}`;
+    }
+  }
   return { xml: out, firstRow, lastRow };
 }
 

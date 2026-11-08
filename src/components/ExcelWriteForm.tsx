@@ -88,14 +88,15 @@ export function ExcelWriteForm(props: {
 
       if (props.book === "company") {
         if (!isCompanyBook) throw new Error("企業ごとのシートが見つかりません。企業シートのファイルを選んでください");
-        const { inFile, noSheet, newSheets, plan } = planCompanySheets(sheets, notYet);
+        const { inFile, noSheet, newSheets, indexEdit, plan } = planCompanySheets(sheets, notYet);
         if (plan.length === 0) {
           setPrepared({ fileName: file.name, data: buf, ranges: [], items: [], inFile, noSheet, newSheets: [] });
           return;
         }
         const { data, written } = await appendRows(
           buf,
-          plan.map((p) => p.edit),
+          // 目次は最後に（written の並びが plan と同じになるように）
+          [...plan.map((p) => p.edit), ...(indexEdit ? [indexEdit] : [])],
           newSheets,
         );
         const items: WrittenItem[] = plan.flatMap((p, k) => {
@@ -106,7 +107,8 @@ export function ExcelWriteForm(props: {
             return it;
           });
         });
-        setPrepared({ fileName: file.name, data, ranges: written, items, inFile, noSheet, newSheets: newSheets.map((n) => n.name) });
+        // 目次に足した行は「請求を書いた行」ではないので、知らせには出さない
+        setPrepared({ fileName: file.name, data, ranges: written.slice(0, plan.length), items, inFile, noSheet, newSheets: newSheets.map((n) => n.name) });
         return;
       }
 
@@ -262,7 +264,7 @@ export function ExcelWriteForm(props: {
           )}
           {prepared.newSheets.length > 0 && (
             <p className="notice notice-info">
-              企業シートにまだシートがない企業があるので、新しいシート（{prepared.newSheets.map((n) => `「${n}」`).join("、")}）を足します。見出し・列の幅・合計の行は、今あるシートと同じ形です。シートの名前はあとで Excel で変えても大丈夫です。
+              企業シートにまだシートがない企業があるので、新しいシート（{prepared.newSheets.map((n) => `「${n}」`).join("、")}）を足します。見出し・列の幅・合計の行は、今あるシートと同じ形です。目次シートのいちばん下にも、企業名とシートへのリンクを足します。シートの名前はあとで Excel で変えても大丈夫です。
             </p>
           )}
           {prepared.items.length > 0 ? (

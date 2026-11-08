@@ -228,7 +228,7 @@ await test("企業シート：シートのない企業は、いつもの形の�
     "[Content_Types].xml": `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
     "xl/workbook.xml": `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="2"/></bookViews><sheets><sheet name="目次" sheetId="1" r:id="rId1"/><sheet name="テスト工業" sheetId="2" r:id="rId2"/><sheet name="データ" sheetId="5" r:id="rId3"/></sheets><definedNames><definedName name="x" localSheetId="1">#REF!</definedName><definedName name="x" localSheetId="2">#REF!</definedName></definedNames></workbook>`,
     "xl/_rels/workbook.xml.rels": `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="ws" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="ws" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="ws" Target="worksheets/sheet3.xml"/></Relationships>`,
-    "xl/worksheets/sheet1.xml": `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>`,
+    "xl/worksheets/sheet1.xml": `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="2">${is("A2", "あ")}${is("B2", "株式会社あいう")}</row></sheetData><pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>`,
     "xl/worksheets/sheet2.xml": companySheetXml.replace("<sheetData>", `<sheetPr codeName="Sheet9"/><sheetViews><sheetView tabSelected="1" workbookViewId="0"/></sheetViews><sheetData>`)
       .replace(`<row r="6">`, `<row r="4">${is("A4", "申込書ページはこちらをクリック")}</row><row r="6">`)
       .replace("</worksheet>", `<hyperlinks><hyperlink ref="A4" location="申込書!A1"/></hyperlinks><drawing r:id="rId1"/></worksheet>`),
@@ -236,10 +236,10 @@ await test("企業シート：シートのない企業は、いつもの形の�
   });
   const sheets = await readWorkbook(book);
   const bill = { ...companyBill([line("人材紹介", 500000, 1), line("交通費", 3200, 1)]), company_name: "株式会社あたらしい" };
-  const { plan, newSheets } = planCompanySheets(sheets, [{ companyBill: bill }]);
+  const { plan, newSheets, indexEdit } = planCompanySheets(sheets, [{ companyBill: bill }]);
   assert.deepEqual(newSheets.map((n) => [n.name, n.copyOf, n.after]), [["株式会社あたらしい", "テスト工業", "テスト工業"]]);
-  const { data, written } = await appendRows(book, plan.map((p) => p.edit), newSheets);
-  assert.deepEqual(written, [{ sheet: "株式会社あたらしい", firstRow: 7, lastRow: 8 }]);
+  const { data, written } = await appendRows(book, [...plan.map((p) => p.edit), indexEdit], newSheets);
+  assert.deepEqual(written, [{ sheet: "株式会社あたらしい", firstRow: 7, lastRow: 8 }, { sheet: "目次", firstRow: 3, lastRow: 3 }]);
   const after = await readWorkbook(data);
   assert.deepEqual(after.map((x) => x.name), ["目次", "テスト工業", "株式会社あたらしい", "データ"]);
   const r = after.find((x) => x.name === "株式会社あたらしい").rows;
@@ -261,6 +261,11 @@ await test("企業シート：シートのない企業は、いつもの形の�
   assert.match(wb, /localSheetId="1">#REF!<\/definedName><definedName name="x" localSheetId="3">/); // 後ろのシートの番号はずれる
   assert.match(wb, /activeTab="3"/);
   assert.match(await sheetXml(data, "[Content_Types].xml"), /PartName="\/xl\/worksheets\/sheet4\.xml"/);
+  // 目次：いちばん下に企業名と、そのシートへのリンク（読みの A は空ける）
+  const idx = after.find((x) => x.name === "目次").rows;
+  assert.equal(idx.get(3).get(2), "株式会社あたらしい");
+  assert.equal(idx.get(3).get(1) ?? null, null);
+  assert.match(await sheetXml(data, "xl/worksheets/sheet1.xml"), /<hyperlinks><hyperlink ref="B3" location="'株式会社あたらしい'!A1" display="株式会社あたらしい"\/><\/hyperlinks><pageMargins/);
   assert.match(await sheetXml(data, "xl/_rels/workbook.xml.rels"), /Id="rId4"[^>]*Target="worksheets\/sheet4\.xml"/);
 });
 

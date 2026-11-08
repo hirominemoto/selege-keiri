@@ -310,5 +310,23 @@ export function planCompanySheets<T extends { companyBill?: CompanySheetBill }>(
       plan.set(sheet.name, { edit: { ...edit, rows: [...edit.rows] }, items: [{ item, rowCount }] });
     }
   }
-  return { inFile, noSheet, newSheets, plan: [...plan.values()] };
+  return { inFile, noSheet, newSheets, indexEdit: indexEditFor(sheets, newSheets, addedFor), plan: [...plan.values()] };
+}
+
+export const INDEX_SHEET = "目次";
+
+/**
+ * 目次シートに、新しく足した企業を書き足す形にする（目次がなければ null）
+ * 今までの足し方（いちばん下に、A の読みは空けて B に企業名とシートへのリンク）にそろえる
+ */
+function indexEditFor(sheets: SheetData[], newSheets: NewSheet[], addedFor: Map<string, SheetData>): SheetEdit | null {
+  if (newSheets.length === 0 || !sheets.some((s) => s.name === INDEX_SHEET)) return null;
+  const companyOf = new Map([...addedFor].map(([company, sheet]) => [sheet.name, company]));
+  return {
+    sheet: INDEX_SHEET,
+    startRow: 2,
+    keyCol: "B",
+    rows: newSheets.map((n) => ({ B: companyOf.get(n.name) ?? n.name })),
+    links: newSheets.map((n) => ({ col: "B", sheet: n.name })),
+  };
 }
