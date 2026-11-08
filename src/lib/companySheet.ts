@@ -11,7 +11,7 @@
 import { excelDate, type CellValue, type SheetData } from "./xlsx";
 import { NOT_COMPANY_SHEETS, nameKey, stripMonth } from "./legacySheet";
 import { oneLine } from "./excelRows";
-import type { SheetEdit, WriteRow } from "./xlsxWrite";
+import { isValidSheetName, type NewSheet, type SheetEdit, type WriteRow } from "./xlsxWrite";
 
 export const COMPANY_HEADER_ROW = 6;
 export const COMPANY_FIRST_ROW = 7;
@@ -182,22 +182,107 @@ export function companySheetEdit(s: SheetData, bill: CompanySheetBill): SheetEdi
   };
 }
 
+const STANDARD_HEADER = ["請求日", "クライアント名", "案件名", "単価", "個数", "売上金額", "備考", "計上月", "支払期限"];
+
+/**
+ * 新しい企業のシートの元にするシート：見出しが A〜I のいつもの並びで、「売上合計」の行があるもの
+ * そのうち、明細を書ける行がいちばん多いもの（同じなら、ブックの中で先にあるもの）
+ */
+export function chooseTemplateSheet(sheets: SheetData[]): SheetData | null {
+  let best: { s: SheetData; total: number } | null = null;
+  for (const s of sheets) {
+    if (!isCompanySheet(s)) continue;
+    const head = s.rows.get(COMPANY_HEADER_ROW)!;
+    if (!STANDARD_HEADER.every((label, i) => norm(str(head.get(i + 1))).startsWith(norm(label)))) continue;
+    const total = totalRow(s);
+    if (!total) continue;
+    if (!best || total > best.total) best = { s, total };
+  }
+  return best?.s ?? null;
+}
+
+/** 新しいシートの名前：企業名（シート名に使えない文字は除き、31文字まで）。同じ名前があれば末尾に 2, 3… */
+export function newSheetName(companyName: string, existing: Iterable<string>): string {
+  const taken = new Set([...existing].map((n) => n.toLowerCase()));
+  const base = companyName.replace(/[:\\/?*[\]]/g, "").replace(/^'+|'+$/g, "").trim().slice(0, 31) || "新しい企業";
+  let name = base;
+  for (let i = 2; taken.has(name.toLowerCase()) || !isValidSheetName(name); i++) {
+    name = `${base.slice(0, 31 - String(i).length)}${i}`;
+  }
+  return name;
+}
+
+/**
+ * 元のシートを写した、新しい企業のシートを用意する
+ *   - spec：xlsxWrite で写すときの指示（明細の行と上の欄は値を消す。F には =D×E を入れ直す。B2 は新しい企業名）
+ *   - sheet：写したあとのシートの中身（書く行を決めるために使う）
+ */
+export function prepareNewCompanySheet(
+  template: SheetData,
+  name: string,
+  bill: Pick<CompanySheetBill, "company_name" | "accounting_month">,
+  after?: string,
+): { spec: NewSheet; sheet: SheetData } {
+  const total = totalRow(template);
+  if (!total) throw new Error(`「${template.name}」シートに「売上合計」の行がありません`);
+  const cols = headerColumns(template);
+  const client = clientLabel(null, bill.company_name, Number(bill.accounting_month.slice(5, 7)));
+  const formulas = cols.amount && cols.unit && cols.qty ? { [cols.amount]: `${cols.unit}{r}*${cols.qty}{r}` } : undefined;
+  const spec: NewSheet = {
+    name,
+    copyOf: template.name,
+    after,
+    clear: [
+      { from: 1, to: COMPANY_HEADER_ROW - 1, keep: ["A2"] },
+      { from: COMPANY_FIRST_ROW, to: total - 1, formulas },
+    ],
+    set: { B2: client },
+  };
+  const rows = new Map<number, Map<number, CellValue>>();
+  for (const [r, row] of template.rows) {
+    if (r >= COMPANY_FIRST_ROW && r < total) continue;
+    if (r < COMPANY_HEADER_ROW) {
+      if (r === 2) rows.set(2, new Map<number, CellValue>([[1, row.get(1) ?? "クライアント名"], [2, client]]));
+      continue;
+    }
+    rows.set(r, new Map(row));
+  }
+  if (!rows.has(2)) rows.set(2, new Map<number, CellValue>([[2, client]]));
+  return { spec, sheet: { name, rows } };
+}
+
 /**
  * 請求ごとに企業のシートを探し、シートごとにまとめて書く形にする
  * 同じシートに書く請求が2件以上あるときは、行をつなげて1つの SheetEdit にする（請求ごとの行数は rowCount で別に持つ）
+ * その企業のシートがなければ、いつもの形のシートを写して新しいシートを足す（newSheets）
  */
 export function planCompanySheets<T extends { companyBill?: CompanySheetBill }>(sheets: SheetData[], items: T[]) {
   const inFile: T[] = [];
   const noSheet: T[] = [];
+  const newSheets: NewSheet[] = [];
+  const added: SheetData[] = [];
+  const template = chooseTemplateSheet(sheets);
+  const lastCompany = [...sheets].reverse().find(isCompanySheet)?.name;
   const plan = new Map<string, { edit: SheetEdit; items: { item: T; rowCount: number }[] }>();
   for (const item of items) {
     const bill = item.companyBill;
-    const sheet = bill ? findCompanySheet(sheets, bill) : null;
-    if (!bill || !sheet) {
+    if (!bill) {
       noSheet.push(item);
       continue;
     }
-    if (alreadyInCompanySheet(sheet, bill)) {
+    let sheet = findCompanySheet(added, bill) ?? findCompanySheet(sheets, bill);
+    if (!sheet) {
+      if (!template) {
+        noSheet.push(item);
+        continue;
+      }
+      const name = newSheetName(bill.company_name, [...sheets, ...added].map((x) => x.name));
+      const after = added.length ? added[added.length - 1].name : lastCompany;
+      const prepared = prepareNewCompanySheet(template, name, bill, after);
+      newSheets.push(prepared.spec);
+      added.push(prepared.sheet);
+      sheet = prepared.sheet;
+    } else if (alreadyInCompanySheet(sheet, bill)) {
       inFile.push(item);
       continue;
     }
@@ -211,5 +296,5 @@ export function planCompanySheets<T extends { companyBill?: CompanySheetBill }>(
       plan.set(sheet.name, { edit: { ...edit, rows: [...edit.rows] }, items: [{ item, rowCount }] });
     }
   }
-  return { inFile, noSheet, plan: [...plan.values()] };
+  return { inFile, noSheet, newSheets, plan: [...plan.values()] };
 }

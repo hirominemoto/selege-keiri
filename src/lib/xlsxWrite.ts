@@ -30,6 +30,82 @@ export type SheetEdit = {
 };
 export type SheetWritten = { sheet: string; firstRow: number; lastRow: number };
 
+/**
+ * 今あるシートを写して、新しいシートを足す（企業シートに新しい企業のシートを足すときに使う）
+ *   - 列の幅・行の高さ・セルの書式・見出し・合計の行はそのまま。clear の行は値を消す（書式は残す）
+ *   - ボタン・図・コメント・リンク・マクロとのつながり（codeName）は写さない
+ */
+export type NewSheet = {
+  name: string;
+  copyOf: string;
+  /** このシートのすぐあとに置く（なければいちばん後ろ） */
+  after?: string;
+  /** 値を消す行の範囲。keep のセルは残す。formulas は消した行に入れる式（列 → "D{r}*E{r}"） */
+  clear: { from: number; to: number; keep?: string[]; formulas?: Record<string, string> }[];
+  /** 書くセル（例 B2 にクライアント名） */
+  set?: Record<string, string>;
+};
+
+/** シートの XML を写して、新しいシートの XML にする */
+export function copySheetXml(xml: string, opts: Pick<NewSheet, "clear" | "set">): string {
+  const sdStart = xml.indexOf("<sheetData");
+  const sdOpenEnd = xml.indexOf(">", sdStart) + 1;
+  const sdEnd = xml.indexOf("</sheetData>", sdOpenEnd);
+  if (sdStart < 0 || sdEnd < 0) throw new Error("写すシートの中身が読めませんでした");
+  const set = opts.set ?? {};
+
+  const body = xml.slice(sdOpenEnd, sdEnd).replace(/<row\b([^>]*?)(\/>|>([\s\S]*?)<\/row>)/g, (whole, rowAttrs: string, end: string, inner?: string) => {
+    const r = Number(attr(rowAttrs, "r"));
+    const range = opts.clear.find((c) => r >= c.from && r <= c.to);
+    const setHere = Object.entries(set).filter(([ref]) => Number(ref.match(/\d+$/)?.[0]) === r);
+    if (!range && setHere.length === 0) return whole;
+    const cells = end === "/>" ? [] : parseCells(inner ?? "");
+    const out: Cell[] = cells.map((c) => {
+      const ref = `${colLetters(c.col)}${r}`;
+      if (!range || range.keep?.includes(ref)) return c;
+      const f = range.formulas?.[colLetters(c.col)];
+      const st = c.style ? ` s="${c.style}"` : "";
+      return f
+        ? { ...c, kind: "formula" as const, xml: `<c r="${ref}"${st}><f>${esc(f.replace(/\{r\}/g, String(r)))}</f></c>` }
+        : { ...c, kind: "empty" as const, xml: `<c r="${ref}"${st}/>` };
+    });
+    if (range?.formulas) {
+      for (const [col, f] of Object.entries(range.formulas)) {
+        if (!out.some((c) => c.col === colNumber(col))) {
+          const ref = `${col}${r}`;
+          out.push({ col: colNumber(col), style: null, kind: "formula", xml: `<c r="${ref}"><f>${esc(f.replace(/\{r\}/g, String(r)))}</f></c>` });
+        }
+      }
+    }
+    for (const [ref, v] of setHere) {
+      const col = colNumber(ref.match(/^[A-Z]+/)![0]);
+      const old = out.find((c) => c.col === col);
+      const cell: Cell = { col, style: old?.style ?? null, kind: "str", xml: cellXml(ref, old?.style ?? null, v) };
+      if (old) out[out.indexOf(old)] = cell;
+      else out.push(cell);
+    }
+    out.sort((a, b) => a.col - b.col);
+    return `<row${rowAttrs}>${out.map((c) => c.xml).join("")}</row>`;
+  });
+
+  // 式の計算結果（元のシートの値）は消す。開いたときに計算し直す
+  const fresh = body.replace(/(<c\b[^>]*>)(<f\b[^>]*(?:\/>|>[\s\S]*?<\/f>))<v>[^<]*<\/v>/g, "$1$2");
+  let out = xml.slice(0, sdOpenEnd) + fresh + xml.slice(sdEnd);
+  // 写さないもの：ボタン（controls）・図・コメント・リンク・印刷設定のファイル・マクロのつながり・ほかのシートと同じ印（uid）
+  out = out
+    .replace(/<mc:AlternateContent\b[^>]*>\s*<mc:Choice\b[^>]*>\s*<controls>[\s\S]*?<\/controls>\s*<\/mc:Choice>(?:\s*<mc:Fallback>[\s\S]*?<\/mc:Fallback>)?\s*<\/mc:AlternateContent>/g, "")
+    .replace(/<controls>[\s\S]*?<\/controls>/g, "")
+    .replace(/<hyperlinks>[\s\S]*?<\/hyperlinks>/g, "")
+    .replace(/<(drawing|legacyDrawing|legacyDrawingHF|picture|tableParts)\b[^>]*\/>/g, "")
+    .replace(/<tableParts\b[\s\S]*?<\/tableParts>/g, "")
+    .replace(/<oleObjects>[\s\S]*?<\/oleObjects>/g, "")
+    .replace(/\sr:id="[^"]*"/g, "")
+    .replace(/\sxr:uid="[^"]*"/g, "")
+    .replace(/\scodeName="[^"]*"/g, "")
+    .replace(/\stabSelected="[^"]*"/g, "");
+  return out;
+}
+
 // ---------------------------------------------------------------- zip
 
 type Entry = {
@@ -342,10 +418,16 @@ export function appendToSheetXml(xml: string, edit: Omit<SheetEdit, "sheet">): {
 
 // ---------------------------------------------------------------- ブック
 
+/** Excel のシート名に使えるか（31文字まで・: \\ / ? * [ ] を含まない・前後に ' がない） */
+export function isValidSheetName(name: string): boolean {
+  return name.length > 0 && name.length <= 31 && !/[:\\/?*[\]]/.test(name) && !/^'|'$/.test(name);
+}
+
 /** ブックの、名前で選んだシートに行を書き足す。書き足したブックを返す（元のデータは変えない） */
 export async function appendRows(
   data: ArrayBuffer | Uint8Array,
   edits: SheetEdit[],
+  newSheets: NewSheet[] = [],
 ): Promise<{ data: Uint8Array; written: SheetWritten[] }> {
   const buf = data instanceof Uint8Array ? data : new Uint8Array(data);
   const entries = readZip(buf);
@@ -374,6 +456,59 @@ export async function appendRows(
     const rid = attr(m[1], "r:id");
     const path = rid ? targets.get(rid) : undefined;
     if (name && path) sheetPath.set(name, path);
+  }
+
+  // 新しいシートを足す（写したシートの XML・workbook・rels・Content_Types に書き足す）
+  if (newSheets.length > 0) {
+    const ct = need("[Content_Types].xml");
+    let contentTypes = await entryText(ct);
+    for (const ns of newSheets) {
+      if (sheetPath.has(ns.name)) throw new Error(`シート「${ns.name}」はもうあります`);
+      if (!isValidSheetName(ns.name)) throw new Error(`シートの名前「${ns.name}」は使えません`);
+      const src = sheetPath.get(ns.copyOf);
+      if (!src) throw new Error(`写すシート「${ns.copyOf}」が見つかりません`);
+      const srcEntry = need(src);
+      let n = 1;
+      while (byName.has(`xl/worksheets/sheet${n}.xml`)) n++;
+      const path = `xl/worksheets/sheet${n}.xml`;
+      let rid = 1;
+      while (targets.has(`rId${rid}`)) rid++;
+      const sheetIds = [...workbook.matchAll(/<sheet\b[^>]*\ssheetId="(\d+)"/g)].map((m) => Number(m[1]));
+      const sheetId = Math.max(0, ...sheetIds) + 1;
+
+      const entry: Entry = { ...srcEntry, name: new TextEncoder().encode(path), extAttr: srcEntry.extAttr };
+      await setEntryText(entry, copySheetXml(await entryText(srcEntry), ns));
+      entries.push(entry);
+      byName.set(path, entry);
+      targets.set(`rId${rid}`, path);
+      sheetPath.set(ns.name, path);
+      rels = rels.replace(
+        "</Relationships>",
+        `<Relationship Id="rId${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${n}.xml"/></Relationships>`,
+      );
+      contentTypes = contentTypes.replace(
+        "</Types>",
+        `<Override PartName="/${path}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+      );
+
+      // シートの並びのどこに入れるか。後ろのシートの番号（印刷範囲の localSheetId・開いているシート）を1つずらす
+      const tags = [...workbook.matchAll(/<sheet\b[^>]*?\/>/g)];
+      const afterIdx = ns.after ? tags.findIndex((m) => attr(m[0], "name") === ns.after) : -1;
+      const idx = afterIdx >= 0 ? afterIdx + 1 : tags.length;
+      const tag = `<sheet name="${esc(ns.name)}" sheetId="${sheetId}" r:id="rId${rid}"/>`;
+      if (idx < tags.length) {
+        const at = tags[idx].index!;
+        workbook = workbook.slice(0, at) + tag + workbook.slice(at);
+      } else {
+        workbook = workbook.replace("</sheets>", `${tag}</sheets>`);
+      }
+      workbook = workbook
+        .replace(/(\slocalSheetId=")(\d+)"/g, (m, a: string, v: string) => (Number(v) >= idx ? `${a}${Number(v) + 1}"` : m))
+        .replace(/(<workbookView\b[^>]*?\sactiveTab=")(\d+)"/g, (m, a: string, v: string) => (Number(v) >= idx ? `${a}${Number(v) + 1}"` : m))
+        .replace(/(<workbookView\b[^>]*?\sfirstSheet=")(\d+)"/g, (m, a: string, v: string) => (Number(v) >= idx ? `${a}${Number(v) + 1}"` : m));
+    }
+    await setEntryText(ct, contentTypes);
+    await setEntryText(relsEntry, rels);
   }
 
   const written: SheetWritten[] = [];

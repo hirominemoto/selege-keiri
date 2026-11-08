@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { appendRows, crc32, serialDate } from "../src/lib/xlsxWrite.ts";
 import { readWorkbook, excelDate } from "../src/lib/xlsx.ts";
-import { findCompanySheet, alreadyInCompanySheet, companySheetEdit, clientLabel, planCompanySheets } from "../src/lib/companySheet.ts";
+import { findCompanySheet, alreadyInCompanySheet, companySheetEdit, clientLabel, planCompanySheets, newSheetName } from "../src/lib/companySheet.ts";
 
 /** 圧縮なしの zip を作る（テスト用） */
 function storedZip(files) {
@@ -213,13 +213,61 @@ await test("企業シート：同じ企業の請求が2件あると、1つのシ
   const a = { id: "a", companyBill: companyBill([line("請求A", 1, 1)]) };
   const b = { id: "b", companyBill: companyBill([line("請求B-1", 1, 1), line("請求B-2", 1, 1)]) };
   const c = { id: "c", companyBill: { ...companyBill([line("x", 1, 1)]), company_name: "株式会社べつの会社" } };
-  const { plan, noSheet } = planCompanySheets(sheets, [a, b, c]);
-  assert.deepEqual(noSheet.map((x) => x.id), ["c"]);
-  assert.equal(plan.length, 1);
+  const { plan, noSheet, newSheets } = planCompanySheets(sheets, [a, b, c]);
+  assert.deepEqual(noSheet, []);
+  assert.deepEqual(newSheets.map((n) => n.name), ["株式会社べつの会社"]);
+  assert.equal(plan.length, 2);
   assert.equal(plan[0].edit.rows.length, 3);
   assert.deepEqual(plan[0].items.map((x) => [x.item.id, x.rowCount]), [["a", 1], ["b", 2]]);
-  const { written } = await appendRows(companyBook, plan.map((p) => p.edit));
-  assert.deepEqual(written, [{ sheet: "テスト工業", firstRow: 9, lastRow: 11 }]);
+  const { written } = await appendRows(companyBook, plan.map((p) => p.edit), newSheets);
+  assert.deepEqual(written, [{ sheet: "テスト工業", firstRow: 9, lastRow: 11 }, { sheet: "株式会社べつの会社", firstRow: 7, lastRow: 7 }]);
+});
+
+await test("企業シート：シートのない企業は、いつもの形のシートを写して新しいシートを足して書く", async () => {
+  const book = storedZip({
+    "[Content_Types].xml": `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+    "xl/workbook.xml": `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="2"/></bookViews><sheets><sheet name="目次" sheetId="1" r:id="rId1"/><sheet name="テスト工業" sheetId="2" r:id="rId2"/><sheet name="データ" sheetId="5" r:id="rId3"/></sheets><definedNames><definedName name="x" localSheetId="1">#REF!</definedName><definedName name="x" localSheetId="2">#REF!</definedName></definedNames></workbook>`,
+    "xl/_rels/workbook.xml.rels": `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="ws" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="ws" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="ws" Target="worksheets/sheet3.xml"/></Relationships>`,
+    "xl/worksheets/sheet1.xml": `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>`,
+    "xl/worksheets/sheet2.xml": companySheetXml.replace("<sheetData>", `<sheetPr codeName="Sheet9"/><sheetViews><sheetView tabSelected="1" workbookViewId="0"/></sheetViews><sheetData>`)
+      .replace(`<row r="6">`, `<row r="4">${is("A4", "申込書ページはこちらをクリック")}</row><row r="6">`)
+      .replace("</worksheet>", `<hyperlinks><hyperlink ref="A4" location="申込書!A1"/></hyperlinks><drawing r:id="rId1"/></worksheet>`),
+    "xl/worksheets/sheet3.xml": `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>`,
+  });
+  const sheets = await readWorkbook(book);
+  const bill = { ...companyBill([line("人材紹介", 500000, 1), line("交通費", 3200, 1)]), company_name: "株式会社あたらしい" };
+  const { plan, newSheets } = planCompanySheets(sheets, [{ companyBill: bill }]);
+  assert.deepEqual(newSheets.map((n) => [n.name, n.copyOf, n.after]), [["株式会社あたらしい", "テスト工業", "テスト工業"]]);
+  const { data, written } = await appendRows(book, plan.map((p) => p.edit), newSheets);
+  assert.deepEqual(written, [{ sheet: "株式会社あたらしい", firstRow: 7, lastRow: 8 }]);
+  const after = await readWorkbook(data);
+  assert.deepEqual(after.map((x) => x.name), ["目次", "テスト工業", "株式会社あたらしい", "データ"]);
+  const r = after.find((x) => x.name === "株式会社あたらしい").rows;
+  assert.equal(r.get(2).get(2), "株式会社あたらしい（11月）");
+  assert.equal(r.get(4)?.get(1) ?? null, null); // 申込書へのリンクの文字は写さない
+  assert.equal(r.get(6).get(3), "案件名");
+  assert.equal(r.get(7).get(3), "人材紹介");
+  assert.equal(r.get(8).get(2), "株式会社あたらしい（11月）");
+  assert.equal(r.get(13).get(6), "売上合計");
+  // 元のシートの明細は写さない
+  assert.ok(![...r.values()].some((row) => String(row.get(3) ?? "").includes("在留サポート")));
+  const xml = await sheetXml(data, "xl/worksheets/sheet4.xml");
+  assert.match(xml, /<c r="F7" s="7"><f>D7\*E7<\/f><\/c>/);
+  assert.match(xml, /<c r="F12" s="7"><f>D12\*E12<\/f><\/c>/);
+  assert.match(xml, /<c r="F14"><f>SUM\(F7:F12\)<\/f><\/c>/); // 計算結果は消して、開いたときに計算し直す
+  assert.doesNotMatch(xml, /codeName|tabSelected|hyperlink|<drawing|r:id/);
+  const wb = await sheetXml(data, "xl/workbook.xml");
+  assert.match(wb, /<sheet name="株式会社あたらしい" sheetId="6" r:id="rId4"\/>/);
+  assert.match(wb, /localSheetId="1">#REF!<\/definedName><definedName name="x" localSheetId="3">/); // 後ろのシートの番号はずれる
+  assert.match(wb, /activeTab="3"/);
+  assert.match(await sheetXml(data, "[Content_Types].xml"), /PartName="\/xl\/worksheets\/sheet4\.xml"/);
+  assert.match(await sheetXml(data, "xl/_rels/workbook.xml.rels"), /Id="rId4"[^>]*Target="worksheets\/sheet4\.xml"/);
+});
+
+await test("企業シート：新しいシートの名前は、使えない文字を除いて31文字まで。同じ名前があれば数字を付ける", () => {
+  assert.equal(newSheetName("サンプル/合同会社", []), "サンプル合同会社");
+  assert.equal(newSheetName("テスト工業", ["テスト工業"]), "テスト工業2");
+  assert.equal(newSheetName("あ".repeat(40), []).length, 31);
 });
 
 /** zip の中のファイルを文字で読む（テスト用。なければ null） */
