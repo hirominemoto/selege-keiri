@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { appendRows, crc32, serialDate } from "../src/lib/xlsxWrite.ts";
 import { readWorkbook, excelDate } from "../src/lib/xlsx.ts";
-import { findCompanySheet, alreadyInCompanySheet, companySheetEdit, clientLabel } from "../src/lib/companySheet.ts";
+import { findCompanySheet, alreadyInCompanySheet, companySheetEdit, clientLabel, planCompanySheets } from "../src/lib/companySheet.ts";
 
 /** 圧縮なしの zip を作る（テスト用） */
 function storedZip(files) {
@@ -206,6 +206,20 @@ await test("企業シート：クライアント名は、そのシートの社�
   assert.equal(clientLabel("株式会社　ミクニ（５月）", "株式会社ミクニ", 11), "株式会社　ミクニ（11月）");
   assert.equal(clientLabel("株式会社ノーリツ（11月分）", "株式会社ノーリツ", 12), "株式会社ノーリツ（12月分）");
   assert.equal(clientLabel(null, "新しい会社", 1), "新しい会社（1月）");
+});
+
+await test("企業シート：同じ企業の請求が2件あると、1つのシートにつなげて書き、請求ごとの行数は別に持つ", async () => {
+  const sheets = await readWorkbook(companyBook);
+  const a = { id: "a", companyBill: companyBill([line("請求A", 1, 1)]) };
+  const b = { id: "b", companyBill: companyBill([line("請求B-1", 1, 1), line("請求B-2", 1, 1)]) };
+  const c = { id: "c", companyBill: { ...companyBill([line("x", 1, 1)]), company_name: "株式会社べつの会社" } };
+  const { plan, noSheet } = planCompanySheets(sheets, [a, b, c]);
+  assert.deepEqual(noSheet.map((x) => x.id), ["c"]);
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].edit.rows.length, 3);
+  assert.deepEqual(plan[0].items.map((x) => [x.item.id, x.rowCount]), [["a", 1], ["b", 2]]);
+  const { written } = await appendRows(companyBook, plan.map((p) => p.edit));
+  assert.deepEqual(written, [{ sheet: "テスト工業", firstRow: 9, lastRow: 11 }]);
 });
 
 /** zip の中のファイルを文字で読む（テスト用。なければ null） */

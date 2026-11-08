@@ -181,3 +181,35 @@ export function companySheetEdit(s: SheetData, bill: CompanySheetBill): SheetEdi
     rows,
   };
 }
+
+/**
+ * 請求ごとに企業のシートを探し、シートごとにまとめて書く形にする
+ * 同じシートに書く請求が2件以上あるときは、行をつなげて1つの SheetEdit にする（請求ごとの行数は rowCount で別に持つ）
+ */
+export function planCompanySheets<T extends { companyBill?: CompanySheetBill }>(sheets: SheetData[], items: T[]) {
+  const inFile: T[] = [];
+  const noSheet: T[] = [];
+  const plan = new Map<string, { edit: SheetEdit; items: { item: T; rowCount: number }[] }>();
+  for (const item of items) {
+    const bill = item.companyBill;
+    const sheet = bill ? findCompanySheet(sheets, bill) : null;
+    if (!bill || !sheet) {
+      noSheet.push(item);
+      continue;
+    }
+    if (alreadyInCompanySheet(sheet, bill)) {
+      inFile.push(item);
+      continue;
+    }
+    const edit = companySheetEdit(sheet, bill);
+    const rowCount = edit.rows.length;
+    const p = plan.get(sheet.name);
+    if (p) {
+      p.edit.rows = [...p.edit.rows, ...edit.rows];
+      p.items.push({ item, rowCount });
+    } else {
+      plan.set(sheet.name, { edit: { ...edit, rows: [...edit.rows] }, items: [{ item, rowCount }] });
+    }
+  }
+  return { inFile, noSheet, plan: [...plan.values()] };
+}

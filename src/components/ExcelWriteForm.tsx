@@ -6,9 +6,9 @@ import { markExcelWritten, unmarkExcelWritten, type WrittenItem } from "@/app/(a
 import { ConfirmButton } from "@/components/InvoiceDraftForms";
 import { dateTimeLabel, yen } from "@/lib/format";
 import { readWorkbook, type SheetData } from "@/lib/xlsx";
-import { appendRows, colNumber, type SheetEdit, type SheetWritten, type WriteRow } from "@/lib/xlsxWrite";
+import { appendRows, colNumber, type SheetWritten, type WriteRow } from "@/lib/xlsxWrite";
 import { LEDGER_SHEET } from "@/lib/excelRows";
-import { alreadyInCompanySheet, companySheetEdit, findCompanySheet, isCompanySheet, type CompanySheetBill } from "@/lib/companySheet";
+import { isCompanySheet, planCompanySheets, type CompanySheetBill } from "@/lib/companySheet";
 
 export type ExcelWriteItem = {
   billId: string;
@@ -39,34 +39,6 @@ type Prepared = {
 
 const rangeLabel = (w: SheetWritten, withSheet: boolean) =>
   `${withSheet ? `「${w.sheet}」` : ""}${w.firstRow}${w.lastRow !== w.firstRow ? `〜${w.lastRow}` : ""}行目`;
-
-/** 企業シート：請求ごとに企業のシートを探し、シートごとにまとめて書く形にする */
-function planCompanySheets(sheets: SheetData[], items: ExcelWriteItem[]) {
-  const inFile: ExcelWriteItem[] = [];
-  const noSheet: ExcelWriteItem[] = [];
-  const plan = new Map<string, { edit: SheetEdit; items: ExcelWriteItem[] }>();
-  for (const i of items) {
-    const bill = i.companyBill;
-    const sheet = bill ? findCompanySheet(sheets, bill) : null;
-    if (!bill || !sheet) {
-      noSheet.push(i);
-      continue;
-    }
-    if (alreadyInCompanySheet(sheet, bill)) {
-      inFile.push(i);
-      continue;
-    }
-    const edit = companySheetEdit(sheet, bill);
-    const p = plan.get(sheet.name);
-    if (p) {
-      p.edit.rows.push(...edit.rows);
-      p.items.push({ ...i, rows: edit.rows });
-    } else {
-      plan.set(sheet.name, { edit, items: [{ ...i, rows: edit.rows }] });
-    }
-  }
-  return { inFile, noSheet, plan: [...plan.values()] };
-}
 
 /** そのシートに、目印どおりの行がもうあるか */
 function alreadyInSheet(sheet: SheetData, marks: Record<string, string | number>): boolean {
@@ -123,9 +95,9 @@ export function ExcelWriteForm(props: {
         const { data, written } = await appendRows(buf, plan.map((p) => p.edit));
         const items: WrittenItem[] = plan.flatMap((p, k) => {
           let r = written[k].firstRow;
-          return p.items.map((i) => {
-            const it = { bill_id: i.billId, issued_at: i.issuedAt, sheet: p.edit.sheet, first_row: r, last_row: r + i.rows.length - 1 };
-            r += i.rows.length;
+          return p.items.map(({ item, rowCount }) => {
+            const it = { bill_id: item.billId, issued_at: item.issuedAt, sheet: p.edit.sheet, first_row: r, last_row: r + rowCount - 1 };
+            r += rowCount;
             return it;
           });
         });
