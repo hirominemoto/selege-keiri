@@ -270,6 +270,15 @@ await test("企業シート：新しいシートの名前は、使えない文�
   assert.equal(newSheetName("あ".repeat(40), []).length, 31);
 });
 
+await test("企業シート：似た名前の新しい企業のシートに、今ある企業の請求を入れない", async () => {
+  const sheets = await readWorkbook(companyBook);
+  const nw = { id: "new", companyBill: { ...companyBill([line("新しい会社の請求", 1, 1)]), company_name: "テスト/工業" } };
+  const old = { id: "old", companyBill: { ...companyBill([line("今ある会社の請求", 1, 1)]), sheet_hint: "テスト工業" } };
+  const { plan, newSheets } = planCompanySheets(sheets, [nw, old]);
+  assert.deepEqual(newSheets.map((n) => n.name), ["テスト工業2"]);
+  assert.deepEqual(plan.map((p) => [p.edit.sheet, p.items.map((x) => x.item.id)]), [["テスト工業2", ["new"]], ["テスト工業", ["old"]]]);
+});
+
 /** zip の中のファイルを文字で読む（テスト用。なければ null） */
 async function sheetXml(data, path) {
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);

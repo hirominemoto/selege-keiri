@@ -261,6 +261,8 @@ export function planCompanySheets<T extends { companyBill?: CompanySheetBill }>(
   const noSheet: T[] = [];
   const newSheets: NewSheet[] = [];
   const added: SheetData[] = [];
+  // 新しく足すシートは、同じ企業名の請求だけで使い回す（表記ゆれで、今ある別の企業の請求を入れないため）
+  const addedFor = new Map<string, SheetData>();
   const template = chooseTemplateSheet(sheets);
   const lastCompany = [...sheets].reverse().find(isCompanySheet)?.name;
   const plan = new Map<string, { edit: SheetEdit; items: { item: T; rowCount: number }[] }>();
@@ -270,7 +272,7 @@ export function planCompanySheets<T extends { companyBill?: CompanySheetBill }>(
       noSheet.push(item);
       continue;
     }
-    let sheet = findCompanySheet(added, bill) ?? findCompanySheet(sheets, bill);
+    let sheet = findCompanySheet(sheets, bill) ?? addedFor.get(bill.company_name) ?? null;
     if (!sheet) {
       if (!template) {
         noSheet.push(item);
@@ -281,6 +283,7 @@ export function planCompanySheets<T extends { companyBill?: CompanySheetBill }>(
       const prepared = prepareNewCompanySheet(template, name, bill, after);
       newSheets.push(prepared.spec);
       added.push(prepared.sheet);
+      addedFor.set(bill.company_name, prepared.sheet);
       sheet = prepared.sheet;
     } else if (alreadyInCompanySheet(sheet, bill)) {
       inFile.push(item);
