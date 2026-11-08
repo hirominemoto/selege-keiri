@@ -47,7 +47,9 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
   const companySheet: ExcelRows = {
     book: "企業シート",
     sheet: companySheetName ?? bill.company_name,
-    sheetNote: companySheetName ? "この企業のシートのいちばん下に足します" : "この企業のシートがまだありません（新しいシートを足します）",
+    sheetNote: companySheetName
+      ? "この企業のシートの、いちばん下の明細の次の行から足します"
+      : "企業シートを取り込んだときに、この企業のシートはありませんでした（ファイルに企業のシートがなければ、書きません）",
     columns: [
       { col: "A", label: "請求日" },
       { col: "B", label: "クライアント名" },
@@ -70,7 +72,10 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
       `${m}月`,
       bill.payment_due_date,
     ]),
-    notes: ["F 売上金額は、今までどおり式（=D×E）で入れます"],
+    notes: [
+      "B クライアント名は、そのシートで今まで使ってきた社名の書き方に「（◯月）」を付けます",
+      "F 売上金額は、今までどおり式（=D×E）で入れます（空いている行に前もって入っている式を使います）",
+    ],
   };
 
   const salesSheet: ExcelRows = {
@@ -142,7 +147,7 @@ export function excelRowsForBill(bill: BillForExcel, companySheetName: string | 
 }
 
 /** 内訳の改行は請求書の上だけのもの。Excelには1行にして書く */
-function oneLine(s: string): string {
+export function oneLine(s: string): string {
   return s.replace(/\s*\r?\n\s*/g, "");
 }
 

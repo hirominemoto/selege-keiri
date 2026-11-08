@@ -19,7 +19,7 @@ type Written = {
 };
 
 /**
- * Excelへの記入：計上月を選び、その月の請求（請求書を作ったもの）を売上表・収支一覧に書き足す
+ * Excelへの記入：計上月を選び、その月の請求（請求書を作ったもの）を売上表・収支一覧・企業シートに書き足す
  * ファイルはブラウザの中だけで読み書きする。サーバーには「どの請求を何行目に書いたか」だけを残す
  */
 export default async function ExcelPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
@@ -48,9 +48,57 @@ export default async function ExcelPage({ searchParams }: { searchParams: Promis
     : { data: [] };
   const written = (writtenData ?? []) as Written[];
 
-  const items = (book: "sales" | "ledger"): ExcelWriteItem[] =>
+  // 企業シート：企業のシートを探す手がかり（取り込みのときのシート名・企業の別名）
+  const companyIds = [...new Set(issued.map((b) => b.company_id))];
+  const [{ data: sheetRows }, { data: aliasRows }] = companyIds.length
+    ? await Promise.all([
+        supabase.from("legacy_sheet_rows").select("company_id, sheet_name, issue_date").in("company_id", companyIds).order("issue_date", { ascending: false }),
+        supabase.from("company_aliases").select("company_id, alias").in("company_id", companyIds),
+      ])
+    : [{ data: [] }, { data: [] }];
+  const sheetHint = new Map<string, string>();
+  for (const r of (sheetRows ?? []) as { company_id: string; sheet_name: string }[]) {
+    if (!sheetHint.has(r.company_id)) sheetHint.set(r.company_id, r.sheet_name); // いちばん新しい行のシート
+  }
+  const aliases = (id: string) => ((aliasRows ?? []) as { company_id: string; alias: string }[]).filter((a) => a.company_id === id).map((a) => a.alias);
+
+  const items = (book: "sales" | "ledger" | "company"): ExcelWriteItem[] =>
     issued.map((b) => {
       const lines = [...b.bill_lines].sort((x, y) => x.sort - y.sort);
+      const w = written.find((x) => x.bill_id === b.id && x.book === book) ?? null;
+      const common = {
+        billId: b.id,
+        issuedAt: b.issued_at ?? "",
+        invoiceNo: b.invoice_no ?? "",
+        company: b.companies?.name ?? "",
+        total: b.total ?? 0,
+        lineCount: lines.length,
+        written: w ? { sheet: w.sheet, firstRow: w.first_row, lastRow: w.last_row, fileName: w.file_name, at: w.written_at } : null,
+        // 書いたあとに「作り直す」で請求書を作り直した
+        reissuedAfterWrite: !!(w && b.issued_at && b.issued_at > w.written_at),
+      };
+      if (book === "company") {
+        return {
+          ...common,
+          rows: [],
+          marks: {},
+          companyBill: {
+            company_name: b.companies?.name ?? "",
+            aliases: aliases(b.company_id),
+            sheet_hint: sheetHint.get(b.company_id) ?? null,
+            issue_date: b.issue_date,
+            accounting_month: b.accounting_month,
+            payment_due_date: b.payment_due_date,
+            lines: lines.map((l) => ({
+              description: l.description,
+              unit_price: l.unit_price,
+              quantity: Number(l.quantity),
+              amount: l.amount,
+              note: l.note ?? null,
+            })),
+          },
+        };
+      }
       const books = excelRowsForBill(
         {
           company_name: b.companies?.name ?? "",
@@ -66,25 +114,16 @@ export default async function ExcelPage({ searchParams }: { searchParams: Promis
       );
       const rows = books.find((x) => x.book === (book === "sales" ? "売上表" : "収支一覧"))!;
       const edit = toSheetEdit(rows);
-      const w = written.find((x) => x.bill_id === b.id && x.book === book) ?? null;
       // ファイルにもう書いてあるかを見分ける目印（1行目の値）
       const first = edit.rows[0] ?? {};
       const marks = book === "sales" ? { C: first.C } : { B: first.B, C: first.C, D: first.D };
       return {
-        billId: b.id,
-        issuedAt: b.issued_at ?? "",
-        invoiceNo: b.invoice_no ?? "",
-        company: b.companies?.name ?? "",
-        total: b.total ?? 0,
-        lineCount: lines.length,
+        ...common,
         rows: edit.rows,
         marks: Object.fromEntries(Object.entries(marks).filter(([, v]) => typeof v === "string" || typeof v === "number")) as Record<
           string,
           string | number
         >,
-        written: w ? { sheet: w.sheet, firstRow: w.first_row, lastRow: w.last_row, fileName: w.file_name, at: w.written_at } : null,
-        // 書いたあとに「作り直す」で請求書を作り直した
-        reissuedAfterWrite: !!(w && b.issued_at && b.issued_at > w.written_at),
       };
     });
 
@@ -94,7 +133,7 @@ export default async function ExcelPage({ searchParams }: { searchParams: Promis
         <div>
           <h1>Excelへの記入</h1>
           <p className="lead">
-            請求書を作った請求を、売上表と収支一覧に書き足します。Excelファイルは、このパソコンのブラウザの中だけで読み書きします（サーバーには送りません）。
+            請求書を作った請求を、売上表・収支一覧・企業シートに書き足します。Excelファイルは、このパソコンのブラウザの中だけで読み書きします（サーバーには送りません）。
           </p>
         </div>
       </div>
@@ -150,6 +189,15 @@ export default async function ExcelPage({ searchParams }: { searchParams: Promis
             sheet={LEDGER_SHEET}
             hint={`収支一覧の「${LEDGER_SHEET}」シートに書きます。月の合計は「収支一覧2027（NEW）」に式で出ます。`}
             items={items("ledger")}
+            canEdit={canEdit}
+          />
+          <ExcelWriteForm
+            key={`company-${m}`}
+            book="company"
+            title="企業シート"
+            sheet="企業ごとのシート"
+            hint="企業シートの、その企業のシートに書きます（いちばん下の明細の次の行から）。F 売上金額は今までどおり式（=単価×個数）です。"
+            items={items("company")}
             canEdit={canEdit}
           />
         </>

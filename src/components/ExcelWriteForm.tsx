@@ -6,8 +6,9 @@ import { markExcelWritten, unmarkExcelWritten, type WrittenItem } from "@/app/(a
 import { ConfirmButton } from "@/components/InvoiceDraftForms";
 import { dateTimeLabel, yen } from "@/lib/format";
 import { readWorkbook, type SheetData } from "@/lib/xlsx";
-import { appendRows, colNumber, type WriteRow } from "@/lib/xlsxWrite";
+import { appendRows, colNumber, type SheetWritten, type WriteRow } from "@/lib/xlsxWrite";
 import { LEDGER_SHEET } from "@/lib/excelRows";
+import { isCompanySheet, planCompanySheets, type CompanySheetBill } from "@/lib/companySheet";
 
 export type ExcelWriteItem = {
   billId: string;
@@ -17,7 +18,10 @@ export type ExcelWriteItem = {
   company: string;
   total: number;
   lineCount: number;
+  /** 売上表・収支一覧に書く行（企業シートは、ファイルを読んでから companyBill で作る） */
   rows: WriteRow[];
+  /** 企業シートに書く請求の中身（どのシートの何行目かは、ファイルを読んでから決まる） */
+  companyBill?: CompanySheetBill;
   /** ファイルにもう書いてあるかを見分ける目印：列 → 1行目の値 */
   marks: Record<string, string | number>;
   written: { sheet: string; firstRow: number; lastRow: number; fileName: string | null; at: string } | null;
@@ -27,11 +31,14 @@ export type ExcelWriteItem = {
 type Prepared = {
   fileName: string;
   data: Uint8Array;
-  firstRow: number;
-  lastRow: number;
+  ranges: SheetWritten[];
   items: WrittenItem[];
   inFile: ExcelWriteItem[]; // ファイルにもう書いてあったので、書かなかったもの
+  noSheet: ExcelWriteItem[]; // 企業シートに、その企業のシートがなかったもの
 };
+
+const rangeLabel = (w: SheetWritten, withSheet: boolean) =>
+  `${withSheet ? `「${w.sheet}」` : ""}${w.firstRow}${w.lastRow !== w.firstRow ? `〜${w.lastRow}` : ""}行目`;
 
 /** そのシートに、目印どおりの行がもうあるか */
 function alreadyInSheet(sheet: SheetData, marks: Record<string, string | number>): boolean {
@@ -43,9 +50,9 @@ function alreadyInSheet(sheet: SheetData, marks: Record<string, string | number>
   return false;
 }
 
-/** 1つのブック（売上表 または 収支一覧）への記入 */
+/** 1つのブック（売上表・収支一覧・企業シート）への記入 */
 export function ExcelWriteForm(props: {
-  book: "sales" | "ledger";
+  book: "sales" | "ledger" | "company";
   title: string;
   sheet: string;
   hint: string;
@@ -73,15 +80,38 @@ export function ExcelWriteForm(props: {
       const sheets = await readWorkbook(buf);
       const names = sheets.map((s) => s.name);
       const isLedger = names.includes(LEDGER_SHEET);
-      if (props.book === "sales" && isLedger) throw new Error("これは収支一覧のファイルのようです。売上表のファイルを選んでください");
+      const isCompanyBook = sheets.some(isCompanySheet);
+      if (props.book !== "ledger" && isLedger) throw new Error(`これは収支一覧のファイルのようです。${props.title}のファイルを選んでください`);
+      if (props.book !== "company" && isCompanyBook) throw new Error(`これは企業シートのファイルのようです。${props.title}のファイルを選んでください`);
       if (props.book === "ledger" && !isLedger) throw new Error(`「${LEDGER_SHEET}」シートがありません。収支一覧のファイルを選んでください`);
+
+      if (props.book === "company") {
+        if (!isCompanyBook) throw new Error("企業ごとのシートが見つかりません。企業シートのファイルを選んでください");
+        const { inFile, noSheet, plan } = planCompanySheets(sheets, notYet);
+        if (plan.length === 0) {
+          setPrepared({ fileName: file.name, data: buf, ranges: [], items: [], inFile, noSheet });
+          return;
+        }
+        const { data, written } = await appendRows(buf, plan.map((p) => p.edit));
+        const items: WrittenItem[] = plan.flatMap((p, k) => {
+          let r = written[k].firstRow;
+          return p.items.map(({ item, rowCount }) => {
+            const it = { bill_id: item.billId, issued_at: item.issuedAt, sheet: p.edit.sheet, first_row: r, last_row: r + rowCount - 1 };
+            r += rowCount;
+            return it;
+          });
+        });
+        setPrepared({ fileName: file.name, data, ranges: written, items, inFile, noSheet });
+        return;
+      }
+
       const target = sheets.find((s) => s.name === props.sheet);
       if (!target) throw new Error(`「${props.sheet}」シートがありません。${props.title}のファイルか確かめてください`);
 
       const inFile = notYet.filter((i) => alreadyInSheet(target, i.marks));
       const toWrite = notYet.filter((i) => !inFile.includes(i));
       if (toWrite.length === 0) {
-        setPrepared({ fileName: file.name, data: buf, firstRow: 0, lastRow: 0, items: [], inFile });
+        setPrepared({ fileName: file.name, data: buf, ranges: [], items: [], inFile, noSheet: [] });
         return;
       }
       const rows = toWrite.flatMap((i) => i.rows);
@@ -93,7 +123,7 @@ export function ExcelWriteForm(props: {
         r += i.rows.length;
         return it;
       });
-      setPrepared({ fileName: file.name, data, firstRow, lastRow: written[0].lastRow, items, inFile });
+      setPrepared({ fileName: file.name, data, ranges: written, items, inFile, noSheet: [] });
     } catch (e) {
       setError(e instanceof Error ? e.message : "ファイルを読めませんでした");
     } finally {
@@ -123,7 +153,7 @@ export function ExcelWriteForm(props: {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
       setDone(
-        `「${p.fileName}」に${p.items.length}件（${p.firstRow}〜${p.lastRow}行目）を書き足して、ダウンロードしました。いつもの保存場所のファイルに上書きしてください。`,
+        `「${p.fileName}」に${p.items.length}件（${p.ranges.map((w) => rangeLabel(w, props.book === "company")).join("、")}）を書き足して、ダウンロードしました。いつもの保存場所のファイルに上書きしてください。`,
       );
       setPrepared(null);
       setInputKey((k) => k + 1);
@@ -197,7 +227,7 @@ export function ExcelWriteForm(props: {
         <>
           <p>
             まだ書いていない請求が<strong>{notYet.length}件</strong>
-            （{notYet.reduce((s, i) => s + i.rows.length, 0)}行）あります。{props.title}のファイルを選んでください。
+            （{notYet.reduce((s, i) => s + i.lineCount, 0)}行）あります。{props.title}のファイルを選んでください。
           </p>
           <input
             key={inputKey}
@@ -220,12 +250,24 @@ export function ExcelWriteForm(props: {
               ファイルにもう書いてある請求がありました（{prepared.inFile.map((i) => `${i.company} ${i.invoiceNo}`).join("、")}）。この請求は書きません。
             </p>
           )}
+          {prepared.noSheet.length > 0 && (
+            <p className="notice notice-warn">
+              企業シートに、この企業のシートが見つかりませんでした（{prepared.noSheet.map((i) => `${i.company} ${i.invoiceNo}`).join("、")}）。この請求は書きません。
+            </p>
+          )}
           {prepared.items.length > 0 ? (
             <>
-              <p>
-                「{prepared.fileName}」の「{props.sheet}」シートの <strong>{prepared.firstRow}〜{prepared.lastRow}行目</strong>に、
-                {prepared.items.length}件を書き足します。
-              </p>
+              {props.book === "company" ? (
+                <p>
+                  「{prepared.fileName}」の <strong>{prepared.ranges.map((w) => rangeLabel(w, true)).join("、")}</strong>に、
+                  {prepared.items.length}件を書き足します。
+                </p>
+              ) : (
+                <p>
+                  「{prepared.fileName}」の「{props.sheet}」シートの <strong>{prepared.ranges.map((w) => rangeLabel(w, false)).join("、")}</strong>に、
+                  {prepared.items.length}件を書き足します。
+                </p>
+              )}
               <button type="button" className="btn" onClick={save} disabled={saving}>
                 {saving ? "書いています…" : "書き足して保存する"}
               </button>

@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { appendRows, crc32, serialDate } from "../src/lib/xlsxWrite.ts";
 import { readWorkbook, excelDate } from "../src/lib/xlsx.ts";
+import { findCompanySheet, alreadyInCompanySheet, companySheetEdit, clientLabel, planCompanySheets } from "../src/lib/companySheet.ts";
 
 /** 圧縮なしの zip を作る（テスト用） */
 function storedZip(files) {
@@ -122,6 +123,103 @@ await test("もとが fullCalcOnLoad=\"0\" でも、計算し直す印は \"1\" 
   });
   const { data } = await appendRows(off, [{ sheet: "11月", startRow: 2, keyCol: "B", rows: [{ B: "a" }] }]);
   assert.match(await sheetXml(data, "xl/workbook.xml"), /<calcPr calcId="1" fullCalcOnLoad="1"\/>/);
+});
+
+// ---------------------------------------------------------------- 企業シート（実データではなく、同じ形の小さなシート）
+const is = (ref, t, s = "") => `<c r="${ref}"${s} t="inlineStr"><is><t>${t}</t></is></c>`;
+const head = `<row r="2">${is("A2", "クライアント名")}${is("B2", "株式会社テスト工業（9月）")}</row>`
+  + `<row r="6">${["請求日", "クライアント名", "案件名", "単価", "個数", "売上金額（税抜）", "備考", "計上月", "支払期限"].map((t, i) => is(`${"ABCDEFGHI"[i]}6`, t)).join("")}</row>`;
+const dataRow = (r, b, c, date = 46326) => `<row r="${r}"><c r="A${r}" s="11"><v>${date}</v></c>${b ? is(`B${r}`, b) : `<c r="B${r}" s="12"/>`}${is(`C${r}`, c)}<c r="D${r}" s="3"><v>28000</v></c>${is(`E${r}`, "２")}<c r="F${r}" s="7"><f>D${r}*E${r}</f><v>56000</v></c>${is(`H${r}`, "10月")}<c r="I${r}" s="11"><v>46356</v></c></row>`;
+const emptyRow = (r, f) => `<row r="${r}"><c r="A${r}" s="11"/><c r="B${r}" s="12"/><c r="C${r}" s="13"/><c r="F${r}" s="7">${f}<v>0</v></c><c r="I${r}" s="11"/></row>`;
+const companySheetXml = `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A2:I14"/><sheetData>`
+  + head
+  + dataRow(7, "株式会社テスト工業（9月）", "２名：在留サポート（4回目/全24回）", 46295)
+  + dataRow(8, "", "２名：在留サポート（5回目/全24回）") // B が空いている明細の行もある
+  + emptyRow(9, `<f t="shared" ref="F9:F10" si="0">D9*E9</f>`)
+  + emptyRow(10, `<f t="shared" si="0"/>`)
+  + emptyRow(11, `<f>D10*E11</f>`) // 前もって入っている式が1行ずれている
+  + emptyRow(12, `<f>D12*E12</f>`)
+  + `<row r="13">${is("F13", "売上合計")}</row>`
+  + `<row r="14"><c r="F14"><f>SUM(F7:F12)</f><v>112000</v></c></row>`
+  + `</sheetData></worksheet>`;
+const companyBook = storedZip({
+  "[Content_Types].xml": `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>`,
+  "xl/workbook.xml": `<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="目次" sheetId="1" r:id="rId1"/><sheet name="テスト工業" sheetId="2" r:id="rId2"/></sheets></workbook>`,
+  "xl/_rels/workbook.xml.rels": `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="ws" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="ws" Target="worksheets/sheet2.xml"/></Relationships>`,
+  "xl/worksheets/sheet1.xml": `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">${is("A1", "目次")}</row></sheetData></worksheet>`,
+  "xl/worksheets/sheet2.xml": companySheetXml,
+});
+const companyBill = (lines, issue = "2026-11-30") => ({
+  company_name: "テスト工業株式会社", aliases: [], sheet_hint: null,
+  issue_date: issue, accounting_month: "2026-11-01", payment_due_date: "2026-12-31", lines,
+});
+const line = (description, unit_price, quantity, note = null) => ({ description, unit_price, quantity, amount: unit_price * quantity, note });
+
+await test("企業シート：表記ゆれがあっても企業のシートを見つける。ないときは null", async () => {
+  const sheets = await readWorkbook(companyBook);
+  assert.equal(findCompanySheet(sheets, companyBill([])).name, "テスト工業");
+  assert.equal(findCompanySheet(sheets, { company_name: "株式会社べつの会社", aliases: [], sheet_hint: null }), null);
+});
+
+await test("企業シート：A請求日かC案件名のある最後の行の次から書き、前もってある式は使う・ずれた式は直す", async () => {
+  const sheets = await readWorkbook(companyBook);
+  const s = findCompanySheet(sheets, companyBill([]));
+  const edit = companySheetEdit(s, companyBill([
+    line("２名：在留サポート（6回目/全24回）", 28000, 2),
+    line("調整金", 49896, 1, "メモ"),
+    line("内訳が\n2行", 1000, 3),
+  ]));
+  assert.equal(edit.beforeRow, 13);
+  const { data, written } = await appendRows(companyBook, [edit]);
+  assert.deepEqual(written, [{ sheet: "テスト工業", firstRow: 9, lastRow: 11 }]);
+  const r = (await readWorkbook(data)).find((x) => x.name === "テスト工業").rows;
+  assert.equal(excelDate(r.get(9).get(1)), "2026-11-30");
+  assert.equal(r.get(9).get(2), "株式会社テスト工業（11月）");
+  assert.equal(r.get(10).get(3), "調整金");
+  assert.equal(r.get(10).get(7), "メモ");
+  assert.equal(r.get(11).get(3), "内訳が2行");
+  assert.equal(r.get(9).get(5), 2);
+  assert.equal(r.get(9).get(8), "11月");
+  assert.equal(excelDate(r.get(9).get(9)), "2026-12-31");
+  const xml = await sheetXml(data, "xl/worksheets/sheet2.xml");
+  assert.match(xml, /<c r="F9" s="7"><f t="shared" ref="F9:F10" si="0">D9\*E9<\/f>/); // 共有の式はそのまま
+  assert.match(xml, /<c r="F10" s="7"><f t="shared" si="0"\/>/);
+  assert.match(xml, /<c r="F11"[^>]*><f>D11\*E11<\/f>/); // ずれていた式を直す
+  assert.match(xml, /<c r="A9" s="11"><v>46356<\/v><\/c>/); // 日付の書式は上の行にそろえる
+});
+
+await test("企業シート：「売上合計」の行まで足りなければ書かない", async () => {
+  const sheets = await readWorkbook(companyBook);
+  const s = findCompanySheet(sheets, companyBill([]));
+  const edit = companySheetEdit(s, companyBill([1, 2, 3, 4, 5].map((i) => line(`行${i}`, 1, 1))));
+  await assert.rejects(() => appendRows(companyBook, [edit]), /13行目より上に、空いている行が足りません/);
+});
+
+await test("企業シート：同じ請求日・案件名の行があれば「もうある」とみなす", async () => {
+  const sheets = await readWorkbook(companyBook);
+  const s = findCompanySheet(sheets, companyBill([]));
+  assert.equal(alreadyInCompanySheet(s, companyBill([line("２名：在留サポート（5回目/全24回）", 28000, 2)], "2026-10-31")), true);
+  assert.equal(alreadyInCompanySheet(s, companyBill([line("２名：在留サポート（5回目/全24回）", 28000, 2)], "2026-11-30")), false);
+});
+
+await test("企業シート：クライアント名は、そのシートの社名の書き方＋（◯月）。「分」付きのシートは「分」を付ける", () => {
+  assert.equal(clientLabel("株式会社　ミクニ（５月）", "株式会社ミクニ", 11), "株式会社　ミクニ（11月）");
+  assert.equal(clientLabel("株式会社ノーリツ（11月分）", "株式会社ノーリツ", 12), "株式会社ノーリツ（12月分）");
+  assert.equal(clientLabel(null, "新しい会社", 1), "新しい会社（1月）");
+});
+
+await test("企業シート：同じ企業の請求が2件あると、1つのシートにつなげて書き、請求ごとの行数は別に持つ", async () => {
+  const sheets = await readWorkbook(companyBook);
+  const a = { id: "a", companyBill: companyBill([line("請求A", 1, 1)]) };
+  const b = { id: "b", companyBill: companyBill([line("請求B-1", 1, 1), line("請求B-2", 1, 1)]) };
+  const c = { id: "c", companyBill: { ...companyBill([line("x", 1, 1)]), company_name: "株式会社べつの会社" } };
+  const { plan, noSheet } = planCompanySheets(sheets, [a, b, c]);
+  assert.deepEqual(noSheet.map((x) => x.id), ["c"]);
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].edit.rows.length, 3);
+  assert.deepEqual(plan[0].items.map((x) => [x.item.id, x.rowCount]), [["a", 1], ["b", 2]]);
+  const { written } = await appendRows(companyBook, plan.map((p) => p.edit));
+  assert.deepEqual(written, [{ sheet: "テスト工業", firstRow: 9, lastRow: 11 }]);
 });
 
 /** zip の中のファイルを文字で読む（テスト用。なければ null） */
